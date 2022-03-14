@@ -1,0 +1,13 @@
+# See example_config.yml for an explanation of all the accepted fields
+snmp_agent:
+   path: /etc/opt/srlinux/appmgr/user_agents/
+   launch-command: /etc/opt/srlinux/appmgr/user_agents/snmp_agent.sh
+   search-command: /bin/bash /etc/opt/srlinux/appmgr/user_agents/snmp_agent.sh
+   wait-for-config: No
+   failure-threshold: 100
+   failure-action: wait=forever
+   yang-modules:
+       names: 
+           - "snmp_agent"
+       source-directories:
+           - "/etc/opt/srlinux/appmgr/user_agents/yang/"

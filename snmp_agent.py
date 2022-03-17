@@ -14,6 +14,8 @@ import json
 import signal
 import subprocess
 import threading
+import queue
+
 
 import sdk_service_pb2
 import sdk_service_pb2_grpc
@@ -30,7 +32,9 @@ import config_service_pb2
 import telemetry_service_pb2
 import telemetry_service_pb2_grpc
 import sdk_common_pb2
-from logging.handlers import RotatingFileHandler
+#from logging.handlers import RotatingFileHandler
+
+from logger import *
 
 # Modules
 from pygnmi.client import gNMIclient,telemetryParser
@@ -50,54 +54,47 @@ metadata = [('agent_name', agent_name)]
 stub = sdk_service_pb2_grpc.SdkMgrServiceStub(channel)
 
 ##################################################################################################
-## This functions get the app_id from idb for a given app_name
+## This is the GLobal Variables to the snmp agent to work 
 ##################################################################################################
-def get_app_id(app_name):
-    logging.info(f'Metadata {metadata} ')
-    appId_req = sdk_service_pb2.AppIdRequest(name=app_name)
-    app_id_response=stub.GetAppId(request=appId_req, metadata=metadata)
-    logging.info(f'app_id_response {app_id_response.status} {app_id_response.id} ')
-    return app_id_response.id
+host = ('unix:///opt/srlinux/var/run/sr_gnmi_server', 57400)
+
+queue = queue.Queue()
 
 
+log = MyLogger("Logger")
 
-def subscribe_thread():
-    host = ('unix:///opt/srlinux/var/run/sr_gnmi_server',57400)
-    path = ["/interface[name=mgmt0]/admin-state"]
-    #path = ["/"]
-    cert = "/opt/srlinux/bin/server-cert.pem"
+global_paths = ['interface[name=ethernet-1/1]/admin-state',
+         'interface[name=ethernet-1/2]/admin-state']
 
-    #update = [('interface[name=ethernet-1/1]', { 'admin-state': 'enable' } )]
 
+def subscribe_thread(paths):
     subscribe = {
-            'subscription': [
+        'subscription': [
+        ],
+        'use_aliases': False,
+        'mode': 'stream',
+        'encoding': 'json_ietf'
+    }
+
+    for path in paths:
+        subscribe['subscription'].append(
                 {
-                    'path': 'interface[name=ethernet-1/1]/admin-state',
+                    'path': path,
                     'mode': 'on_change',
                     'sample_interval': 1000000000
                 }
-            ],
-            'use_aliases': False,
-            'mode': 'stream',
-            'encoding': 'json_ietf'
-        }
-    #('/bfd/subinterface[name=system0.0]', { 'admin-state': 'enable' } )
-    
-    #with gNMIclient(target=host, username='admin', password='admin', insecure=True, path_cert=cert, debug=True) as gc:
-    #with gNMIclient(target=host, username='admin', password='admin', insecure=True, debug=True) as gc:    
-    with gNMIclient(target= host, username='admin', password='admin', insecure=True) as gc:
-        #result = gc.capabilities()
-        result = gc.get(path=path,encoding='json_ietf')
-        #result = gc.set(update=update,encoding='json_ietf')
-        #result_formatted = json.dumps(result)
-        #print(f"GOT this {result}")
-        #logging.info(result["notification"][0]['update'])
+        )
+            
+      
+    with gNMIclient(target= host, username='admin', password='admin', insecure=True, debug = True) as gc:
         telemetry_stream = gc.subscribe(subscribe=subscribe)
 
+        #pygnmi implements this for as infinite loop
         for telemetry_entry in telemetry_stream:
-            #print(telemetryParser(telemetry_entry))
-            logging.info(f"\n\n{telemetryParser(telemetry_entry)}\n")
-            logging.info("HERRRRRRRRRRRRRRRRRRRRRRRRRRRRRREEEEEEEEEEEEEEEEEEEEEE")
+            telemetry_entry_str = telemetryParser(telemetry_entry) 
+            if not "sync_response" in telemetry_entry_str :
+                queue.put(telemetry_entry_str)
+            
 
 ##################################################################################################
 ## This is the main kproc where all processing for snmp_agent starts.
@@ -107,17 +104,20 @@ def subscribe_thread():
 ##################################################################################################
 def Run():
     response = stub.AgentRegister(request=sdk_service_pb2.AgentRegistrationRequest(), metadata=metadata)
-    logging.info(f"Registration response : {response.status}")
+    log.info(f"Registration response : {response.status}")
 
     ####################################################################################
-    x = threading.Thread(target=subscribe_thread)
+    # START OF SUBSCRIBE THRED
+    x = threading.Thread(target=subscribe_thread, args=(global_paths,))
 
     x.start()
-
+    ################################################################################
     while True:
-        time.sleep(10)
-        logging.info("ENtrou")
-  
+        while not queue.empty():
+            entry = queue.get()
+            
+            log.info(f"{entry}  :::::  QUEUE SIZE --> {queue.qsize()}\n ")
+        
  
     sys.exit()
     return True
@@ -127,13 +127,13 @@ def Run():
 ## When called, will unregister Agent and gracefully exit
 ############################################################
 def Exit_Gracefully(signum, frame):
-    logging.info("Caught signal :: {}\n will unregister snmp_agent".format(signum))
+    log.info("Caught signal :: {}\n will unregister snmp_agent".format(signum))
     try:
         response=stub.AgentUnRegister(request=sdk_service_pb2.AgentRegistrationRequest(), metadata=metadata)
-        logging.error('try: Unregister response:: {}'.format(response))
+        log.error('try: Unregister response:: {}'.format(response))
         sys.exit()
     except grpc._channel._Rendezvous as err:
-        logging.info('GOING TO EXIT NOW: {}'.format(err))
+        log.info('GOING TO EXIT NOW: {}'.format(err))
         sys.exit()
 
 ##################################################################################################
@@ -142,21 +142,12 @@ def Exit_Gracefully(signum, frame):
 ## Signals handled for graceful exit: SIGTERM
 ##################################################################################################
 if __name__ == '__main__':
-    hostname = socket.gethostname()
-    stdout_dir = '/var/log/srlinux/stdout' # PyTEnv.SRL_STDOUT_DIR
+
     signal.signal(signal.SIGTERM, Exit_Gracefully)
-    if not os.path.exists(stdout_dir):
-        os.makedirs(stdout_dir, exist_ok=True)
-    log_filename = '{}/{}_snmpagent.log'.format(stdout_dir, hostname)
-    logging.basicConfig(filename=log_filename, filemode='a',\
-                        format='%(asctime)s,%(msecs)d %(name)s %(levelname)s %(message)s',\
-                        datefmt='%H:%M:%S', level=logging.INFO)
-    handler = RotatingFileHandler(log_filename, maxBytes=3000000,
-                                  backupCount=5)
-    logging.getLogger().addHandler(handler)
-    logging.info("START TIME :: {}".format(datetime.datetime.now()))
+    log.info("START TIME :: {}".format(datetime.datetime.now()))
+
     if Run():
-        logging.info('Agent unregistered and agent routes withdrawed from dut')
+        log.info('Agent unregistered and agent routes withdrawed from dut')
     else:
-        logging.info(f'Some exception caught, Check !')
+        log.info(f'Some exception caught, Check !')
 

@@ -13,49 +13,24 @@ module snmp_agent {
     }
 
 
-    grouping fib-agent-top {
+    grouping snmp_agent-top {
         description "Top level grouping for fib_agent sample app";
+        
+        leaf-list targets {
+            description "Endereço de destino das traps snmp";
+            type string;
+            
+        }
 
-        container fib-agent {
-            presence "presence container";
+        container elements {
+            //presence "presence container";
             description "Top level enclosing container for fib_agent sample app 
                          config and operational state data";
 
-            leaf input-fib {
-                description "Route description file";
-                type string;
-                }
-            leaf action {
-                description "add or delete or replace";
-                type string;
-                }
-            list fib-result {
-                key name;
-                config false;
-
-            leaf name {
-                 type string;
-                }
-            leaf programed-state {
-                type boolean;
-                description "Programmed state of fib routes";
-                }
-            leaf reason-code {
-                type string;
-                description "Reason for unprogrammed fib";
-                }
-            }
-            leaf route-count{
-                type uint64;
-                config false;
-            }
-            leaf programmed-routes{
-                type uint64;
-                config false;
-            }
+            
         }
     }
 
     // data definition statements
-    uses fib-agent-top;
+    uses snmp_agent-top;
 }

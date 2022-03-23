@@ -1,5 +1,4 @@
 module snmp_agent {
-
     yang-version "1";
 
     // namespace
@@ -14,7 +13,7 @@ module snmp_agent {
 
 
     grouping snmp_agent-top {
-        description "Top level grouping for fib_agent sample app";
+        description "Top level grouping for snmp_agentsample app";
         
         leaf-list targets {
             description "Endereço de destino das traps snmp";
@@ -22,12 +21,37 @@ module snmp_agent {
             
         }
 
-        container elements {
+        container monitoring_elements {
             //presence "presence container";
-            description "Top level enclosing container for fib_agent sample app 
+            description "Top level enclosing container for snmp_agent sample app 
                          config and operational state data";
+            list elements{
+                key resource;
+                leaf resource {
+                    type string;
+                    mandatory true;
+                    description "Path of the resource to monitoring";
+                }
+                leaf parameter {
+                    type string;
+                    mandatory true;
+                    description "Element status to keep track";
+                }
+                leaf monitoring_condition {
+                    type string;
+                    mandatory true;
+                    description "Element status to keep track";
+                }
+                leaf resource_filter {
+                    type string;
+                    description "Filter";
+                }
 
-            
+                leaf trigger_condition {
+                    type string;
+                    description "Condition that will trigger the trap";
+                }
+            }     
         }
     }
 

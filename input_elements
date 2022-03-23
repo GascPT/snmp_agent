@@ -1,0 +1,13 @@
+{
+    "elements":[
+        {
+            "resource":"interface[name=*]/",
+            "parameter":"admin-state", 
+            "monitoring_condition":{
+                "admin-state":"enable"
+            },
+            "resource_filter":"ethernet*", 
+            "trigger_condition":"up -> down"
+        }
+    ]
+}

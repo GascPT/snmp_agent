@@ -73,10 +73,10 @@ global_paths = ['interface[name=ethernet-1/1]/admin-state',
 ## This functions get the app_id from IDB for a given app_name
 ##################################################################################################
 def get_app_id(app_name):
-    log.info(f'Metadata {metadata} ')
+    log.info(f'Metadata {metadata}')
     appID_req = sdk_service_pb2.AppIdRequest(name=app_name)
-    app_id_response=stub.GetAppId(request=appID_req, metadata=metadata)
-    log.info(f'app_id_response {app_id_response.status} {app_id_response.id} ')
+    app_id_response = stub.GetAppId(request=appID_req, metadata=metadata)
+    log.info(f'app_id_response {app_id_response.status} {app_id_response.id}')
     return app_id_response.id
 
 
@@ -84,8 +84,7 @@ def get_app_id(app_name):
 ## Subscribe to required event
 ## This proc handles subscription of Config
 ############################################################
-def Subscribe(stream_id):
-    
+def Subscribe(stream_id):  
     op = sdk_service_pb2.NotificationRegisterRequest.AddSubscription
 
     entry = config_service_pb2.ConfigSubscriptionRequest()

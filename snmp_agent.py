@@ -35,6 +35,7 @@ import sdk_common_pb2
 #from logging.handlers import RotatingFileHandler
 
 from logger import *
+from element import *
 
 # Modules
 from pygnmi.client import gNMIclient,telemetryParser
@@ -63,52 +64,36 @@ queue = queue.Queue()
 
 log = MyLogger("Logger")
 
-
 #global_paths = ['interface[name=*]/admin-state']
-
 global_paths = ['interface[name=ethernet-1/1]/admin-state',
                 'interface[name=ethernet-1/2]/admin-state']
 
-##################################################################################################
-## This functions get the app_id from IDB for a given app_name
-##################################################################################################
-def get_app_id(app_name):
-    log.info(f'Metadata {metadata}')
-    appID_req = sdk_service_pb2.AppIdRequest(name=app_name)
-    app_id_response = stub.GetAppId(request=appID_req, metadata=metadata)
-    log.info(f'app_id_response {app_id_response.status} {app_id_response.id}')
-    return app_id_response.id
-
-
+targets = []
+elements = []
 ############################################################
 ## Subscribe to required event
 ## This proc handles subscription of Config
 ############################################################
 def Subscribe(stream_id):  
     op = sdk_service_pb2.NotificationRegisterRequest.AddSubscription
-
     entry = config_service_pb2.ConfigSubscriptionRequest()
     request = sdk_service_pb2.NotificationRegisterRequest(op=op, stream_id=stream_id, config=entry)
 
     subscription_response = stub.NotificationRegister(request=request, metadata=metadata)
-    
+
     if subscription_response.status == sdk_common_pb2.SdkMgrStatus.Value("kSdkMgrFailed"):
         log.info("Subscription Config register Failed")
 
-    
     log.info('Status of subscription response for config :: {}'.format(subscription_response.status))
 
 ############################################################
 ## Subscribe to all the events that Agent needs
 ############################################################
 def Subscribe_Notifications(stream_id):
-    '''
-    Agent will receive notifications to what is subscribed here.
-    '''
     if not stream_id:
         log.info("Stream ID not sent.")
         return False
-    log.info("ENtering Subscribe function")
+    
     ##Subscribe to Config Notifications - configs added by the fib-agent
     Subscribe(stream_id)
 
@@ -116,7 +101,7 @@ def Subscribe_Notifications(stream_id):
 ## Function to populate state of agent config 
 ## using telemetry -- add/update info from state 
 ############################################################
-def Add_Telemetry(js_path, js_data ):
+def Add_Telemetry(js_path, js_data):
     telemetry_stub = telemetry_service_pb2_grpc.SdkMgrTelemetryServiceStub(channel)
     telemetry_update_request = telemetry_service_pb2.TelemetryUpdateRequest()
     telemetry_info = telemetry_update_request.state.add()
@@ -139,20 +124,115 @@ def Delete_Telemetry(js_path):
     telemetry_response = telemetry_stub.TelemetryDelete(request=telemetry_delete_request, metadata=metadata)
     return telemetry_response
 
+def addTargetsToTelemetry():
+    global targets
+    js_path = '.' + agent_name
+    json_content = { "target": { "address": [ ] } }
+
+    for t in targets:
+        json_content['target']['address'].append({"value": f'{t}'})  
+    
+    log.info(json_content)
+    r = Add_Telemetry(js_path,json.dumps(json_content))
+
+def addStatusToMemory(obj, filename = None):
+    global targets, elements
+    # From Notification
+    if filename == None:
+        #Check if are target config
+        if obj.config.key.js_path == ".snmp_agent":
+            #Check if exits any config 
+            if not obj.config.data.json == "{\n}\n":    
+                notification_targets = json.loads(obj.config.data.json) 
+                for target in notification_targets['target']['address']:
+                    if target not in targets:
+                        t = target['value']
+                        targets.append(t)
+                addTargetsToTelemetry() 
+                # Add to the File
+                
+                with open("input_elements","r+") as f:
+                    file_data = json.load(f)
+                    aux_targets = []
+
+                    for target in file_data['targets']:
+                        aux_targets.append(target['address'])
+
+                    #Diff between global state targets and targets written on the file 
+                    diff_targets = [x for x in targets if x not in aux_targets]
+
+                    for t in diff_targets:
+                        file_data['targets'].append({"address" : t})
+                    
+                    f.seek(0)
+                    f.write(json.dumps(file_data, indent=4))
+                    f.truncate()
+                
+                log.info(targets)
+        # Check if are configuration of a element
+        elif obj.config.key.js_path == ".snmp_agent.monitoring_elements.elements":
+            #Check if exits any config 
+            if not obj.config.data.json == "{\n}\n":
+                element_json = json.loads(obj.config.data.json)['elements']
+                log.info(element_json)
+      
+                resource = obj.config.key.keys
+   
+                parameter = element_json['parameter']['value']
+                monitoring_condition = element_json['monitoring_condition']['value']
+  
+                if "resource_filter" in element_json:
+                    resource_filter = element_json['resource_filter']['value']
+                else:
+                    resource_filter = ""
+   
+                
+                if "trigger_condition" in element_json:
+                    trigger_condition = element_json['trigger_condition']['value']
+                else:
+                    trigger_condition = ""
+  
+                e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition)
+
+                elements.append(e)
+  
+                log.info(resource)
+                log.info(parameter)
+
+
+    # From File
+    else:
+        try:
+            with open(filename) as f:
+                file_data = json.load(f)
+                # Add targets to the global variable       
+                for target in file_data['targets']:
+                    if target not in targets:
+                        t = target['address']
+                        targets.append(t)
+                        
+                # Add Targets to State
+                if not len(targets) == 0:
+                    addTargetsToTelemetry()
+                    
+        except Exception as e:
+            logging.info(f"Exception caught while reading file :: {e}")
+            #Set programed status as false
+            return False
+
 
 ##################################################################
 ## Proc to process the config Notifications received by fib_agent 
 ## At present processing config from js_path = .fib-agent
 ##################################################################
 def Handle_Notification(obj):
-    log.info(obj)
     if obj.HasField('config') and obj.config.key.js_path != ".commit.end":
         log.info(f"GOT CONFIG :: {obj.config.key.js_path}")
-        log.info(f"OLD FILE :: input elements")
-        log.info(f"Handle_Config with file_name as input_elements")
-        if "fib_agent" in obj.config.key.js_path:
+        if "snmp_agent" in obj.config.key.js_path:
             log.info(f"Got config for agent, now will handle it :: \n{obj.config}\
                             Operation :: {obj.config.op}\nData :: {obj.config.data.json}")
+
+            addStatusToMemory(obj)
     
     #always return
     return True
@@ -208,7 +288,21 @@ def subscribe_thread(paths):
             telemetry_entry_str = telemetryParser(telemetry_entry) 
             if not "sync_response" in telemetry_entry_str :
                 queue.put(telemetry_entry_str)
-            
+
+
+def sendSNMPTrap(entry,target):
+
+
+    return None
+
+def sendToAllTargets(entry):
+    global targets
+
+    for target in targets:
+        sendSNMPTrap(entry, target)
+    
+
+
 
 ##################################################################################################
 ## This is the main kproc where all processing for snmp_agent starts.
@@ -220,13 +314,6 @@ def Run():
     response = stub.AgentRegister(request=sdk_service_pb2.AgentRegistrationRequest(agent_liveliness=5), metadata=metadata)
     log.info(f"Registration response : {response.status}")
 
-    app_id = get_app_id(agent_name)
-
-    if not app_id:
-        log.error(f'idb does not have the appID for {agent_name} : {app_id}')
-    else:
-        log.info(f'Got appId {app_id} for {agent_name}')
-    
     # Send Keep Alives
     th = threading.Thread(target=send_keep_alive)
     th.start()
@@ -245,22 +332,30 @@ def Run():
 
     notificationStreamThread = threading.Thread(target=NotificationStreamThread, args=(stream_id,))
     notificationStreamThread.start()
+
+    #if os.path.exists('input_elements'):
+    #    addStatusToMemory(None,"input_elements")
    
     ####################################################################################
     # START OF SUBSCRIBE GNMI THREAD
 
     x = threading.Thread(target=subscribe_thread, args=(global_paths,))
-    print(global_paths)
+    #print(global_paths)
     x.start()
     
+    ################################################################################
+    # Infinite Loop to send SNMP traps
     ################################################################################
     while True:
         while not queue.empty():
             entry = queue.get()
-            
-            log.info(f"{entry['update']['update']}  :::::  QUEUE SIZE --> {queue.qsize()}\n ")
-        
+            entry = entry['update']['update']
+
+            sendToAllTargets(entry)
+
+            log.info(f"{entry}  :::::  QUEUE SIZE --> {queue.qsize()}\n ")
  
+        
     sys.exit()
     return True
 

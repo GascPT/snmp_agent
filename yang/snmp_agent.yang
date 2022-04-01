@@ -16,16 +16,18 @@ module snmp_agent {
         description "Top level grouping for snmp_agentsample app";
         
         container snmp-agent{
-            leaf-list targets {
-                description "Endereço de destino das traps snmp";
-                type string;
+            container target{
+                leaf-list address{
+                    type string;
+                    description "Path of the resource to monitoring";     
+                }            
             }
 
             container monitoring_elements {
                 //presence "presence container";
                 description "Top level enclosing container for snmp_agent sample app 
                             config and operational state data";
-                list elements{
+                list element{
                     key resource;
                     leaf resource {
                         type string;

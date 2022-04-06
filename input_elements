@@ -8,11 +8,14 @@
         {
             "resource": "interface[name=*]/",
             "parameter": "admin-state",
-            "monitoring_condition": {
-                "admin-state": "enable"
-            },
-            "resource_filter": "ethernet*",
-            "trigger_condition": "up -> down"
+            "monitoring_condition": "",
+            "resource_filter": [
+                "ethernet*",
+                "lag*",
+                "mgmt*"
+            ],
+            "trigger_condition": "enable->disable",
+            "trigger_message": "oper-down-reason"
         }
     ]
 }

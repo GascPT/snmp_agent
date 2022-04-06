@@ -1,0 +1,23 @@
+{
+    "resource": "interface[name=ethernet-1/2]/",
+    "parameter": "admin-state",
+    "monitoring_condition": "",
+    "resource_filter": [
+        "ethernet*",
+        "lag*",
+        "mgmt*"
+    ],
+    "trigger_condition": "enable->disable",
+    "trigger_message": "oper-down-reason"
+},
+{
+    "resource": "interface[name=*]/",
+    "parameter": "admin-state",
+    "monitoring_condition": "admin-state:enable",
+    "resource_filter": [
+        "ethernet*",
+        "lag*"
+    ],
+    "trigger_condition": "enable->disable",
+    "trigger_message": "oper-down-reason"
+},

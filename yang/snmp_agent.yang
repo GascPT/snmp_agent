@@ -44,7 +44,7 @@ module snmp_agent {
                         mandatory true;
                         description "Element status to keep track";
                     }
-                    leaf resource_filter {
+                    leaf-list resource_filter {
                         type string;
                         description "Filter";
                     }
@@ -52,6 +52,11 @@ module snmp_agent {
                     leaf trigger_condition {
                         type string;
                         description "Condition that will trigger the trap";
+                    }
+
+                    leaf trigger_message {
+                        type string;
+                        description "MIB Event";
                     }
                 }     
             }

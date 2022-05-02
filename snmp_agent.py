@@ -33,7 +33,6 @@ import telemetry_service_pb2
 import telemetry_service_pb2_grpc
 import sdk_common_pb2
 
-
 from logger import *
 from element import *
 
@@ -199,7 +198,7 @@ def addStatusToMemory(obj, filename = None):
                 else:
                     trigger_condition = ""
   
-                e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition, False)
+                e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition, False,"")
 
                 # Add element to monitoring to the list of elements
                 elements.append(e)
@@ -242,9 +241,9 @@ def addStatusToMemory(obj, filename = None):
                     
                     trigger_message = element['trigger_message']
 
-                    e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition, False)
+                    e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition, False,"")
 
-                    log.info(e.print())
+                    #log.info(e.print())
 
                     # Add element to monitoring to the list of elements
                     elements.append(e)
@@ -328,9 +327,9 @@ def getGNMIPath(path):
     with gNMIclient(target = host, username='admin', password='admin', insecure=True, debug = True) as gc:
         return gc.get(path,encoding="json_ietf")
 
+
 # TODO
-def sendSNMPTrap(entry,target):
-    
+def sendSNMPTrap(entry,target):  
     return None
 
 
@@ -344,7 +343,11 @@ def addGlobalPaths():
     global global_paths,elements
     for element in elements:
         path = element.getPath()
+        monitoring_path = element.getMonitoringPath()
+        #Populate global paths with subscribe paths
         global_paths.append(path)
+        global_paths.append(monitoring_path)
+        
 
 def verifyTriggerCondition(element,value):
     trigger = element.getTrigger()
@@ -366,88 +369,76 @@ def verifyTriggerCondition(element,value):
     return False
 
 
-def verifyMonitoringCondition(element, entry_path):
-    m = element.getMonitoring()
-    if m == "":
-        return True
-    parameter,value = m.split(":")
+def cleanUPPath(e):
+    #log.info("Enter Cleaning Stage")
+    pattern = "/[a-zA-Z]+_([a-zA-Z]+(-[a-zA-Z]+)+):"
+    clean_path  = e['path']
+    
+    while len(clean_path.split(":")) > 2 :
+        clean_path = re.sub(pattern,"/",clean_path)
 
-    if element.getParameter() in entry_path: 
-        entry_path = '/'.join(entry_path.split('/')[:-1])
+    clean_path = clean_path.split(":")[1]# Clean the path model
+    #log.info(f"Path Clean: {clean_path}")
 
-    path = entry_path +"/"+ parameter
-    # Get Request to assert with the value
-    result = getGNMIPath(path)
+    if ":" in clean_path:
+        log.info("Error: Exitence of \":\" in path ")
 
-    if result['notification'][0]['update'][0]['val'] == value:
-        return True
+    # ADD PATH + PARAMETER
+    if isinstance(e['val'],str): # Entry with parameter in the path
+        value = e['val']
+        entry_path = clean_path
+    else:   # Entry without parameter in the path
+        value = list(e['val'].items())[0][1]
+        entry_path = clean_path+"/"+list(e['val'].keys())[0]
 
-    return False
-
+    return entry_path,value
 
 def processEntry(entry):
     global elements
-    for element in elements:
-        path = element.getResource()
+    
         # Can be more than one entry from subscribe
-        for e in entry:
-            entry_path = e['path'].split(":")[1] # Clean the path model
-            
-            if isinstance(e['val'],str):
-                value = e['val']
-                aux_path = entry_path
-                entry_path = '/'.join(entry_path.split('/')[:-1])+"/"
-            else:
-                value = list(e['val'].items())[0][1]
-                aux_path = entry_path+"/"+list(e['val'].keys())[0]
-            #log.info(entry_path + ":" + value)
-            if element.verifyIfExistPath(entry_path):
-                log.info("Enter")
-                if verifyTriggerCondition(element,value):
-                    #Generate SNMP TRAP
-                    log.info(element.getPaths())
-                    log.info("Send TRAP - 1")
-            # This below is first entry process    
-            else:
-                # Path with * 
-                if '*' in path:
-                    resource_filter = element.getFilter()
-                    id1 = entry_path.index("=")
-                    id2 = entry_path.index("]")
-                    sub_path = entry_path[id1 + len("") + 1: id2]
-                    for filt in resource_filter:
-                        # Filter with *
-                        if '*' in filt:
-                            sub_filter = filt[:-1]
-                            if sub_filter in sub_path:
-                                # Process Get Request
-                                if verifyMonitoringCondition(element,entry_path):
-                                    # Add to pathsofElement in that element
-                                    if not entry_path in element.getPaths():
-                                        element.addPaths(entry_path+"/"+element.getParameter())
-                                    # Check trigger condition
-                                    if verifyTriggerCondition(element,value):
-                                        #Generate SNMP TRAP
-                                        log.info("Send TRAP - 2")
-                                
-                        else:
-                        # TODO Specific Filter
-                            if filt == sub_path:
-                                log.info("Second filter")
-                # Specific Path    
-                # Because is a specific path dont check filter options       
+    for e in entry:
+        # log.info("Original Entry : " + str(e))
+        # Clean up the path removing the model and adding the parameter
+        entry_path, value = cleanUPPath(e)  
+        for element in elements:
+            path = element.getResource()
+            # Verify if entry belongs to this element
+            if element.verifyIfEntryBelongs(log,entry_path,value):
+                
+                # Verify if exists in subpaths
+                if entry_path in element.getSubPathsKeys():
+                    # Proceed to updates and checks triggers conditions
+                    result, message = element.updateStatus(log,entry_path,value)
+                    
+                    if result:
+                        log.info("Original Entry : " + str(e))
+                        log.info(f"SEND SNMP TRAP with message {message}")
+                    break
+                    
                 else:
-                    log.info(element.getResource()+"||||"+entry_path)
-                    if entry_path == element.getResource():
-                        if verifyMonitoringCondition(element,entry_path):
-                            # Add to pathsofElement in that element
-                            if not entry_path in element.getPaths():
-                                element.addPaths(entry_path)
-                                
-                                # Check trigger condition
-                                if verifyTriggerCondition(element,value):
-                                    #Generate SNMP TRAP
-                                    log.info("Send TRAP - 3")
+                    # Verify if is a monitoring path or normal path 
+                    if element.verifyIfIsMonitoringPath(entry_path):
+                        # ADD STATUS to subpath monitoring
+                        #log.info("Enter Monitoring Path")
+                        resource = "/".join(entry_path.split("/")[:-1])
+                        key_path = resource +"/"+ element.getParameter()
+                        #log.info(resource + "|" + key_path)
+                        element.setSubPath(log,key_path,value)
+                        break
+
+                    elif not element.verifyIfIsMonitoringPath(entry_path):
+                        # First time of the entry
+                        # Check Filter
+                        #log.info("Add Entry for the First Time")
+                        if element.checkFilter(log,entry_path):
+                            #log.info("Passed on Filter Condition")
+                            element.addPath(entry_path,value)
+                        break
+
+        
+
+                
 
 
 
@@ -489,7 +480,7 @@ def Run():
 
     ####################################################################################
     # START OF GNMI SUBSCRIBE THREAD
-
+    log.info(global_paths)
     x = threading.Thread(target=subscribe_thread, args=(global_paths,))
     x.start()
     

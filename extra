@@ -1,23 +1,35 @@
-{
+[{
     "resource": "interface[name=ethernet-1/2]/",
-    "parameter": "admin-state",
+    "parameter": "oper-state",
     "monitoring_condition": "",
     "resource_filter": [
         "ethernet*",
         "lag*",
         "mgmt*"
     ],
-    "trigger_condition": "enable->disable",
+    "trigger_condition": "up->down",
     "trigger_message": "oper-down-reason"
 },
 {
     "resource": "interface[name=*]/",
-    "parameter": "admin-state",
-    "monitoring_condition": "admin-state:enable",
-    "resource_filter": [
-        "ethernet*",
-        "lag*"
-    ],
-    "trigger_condition": "enable->disable",
-    "trigger_message": "oper-down-reason"
+            "parameter": "oper-state",
+            "monitoring_condition": "admin-state=enable",
+            "resource_filter": [
+                "ethernet*",
+                "lag*",
+                "mgmt*"
+            ],
+            "trigger_condition": "up->down",
+            "trigger_message": "oper-down-reason"
 },
+{
+    "resource": "/network-instance[name=*]/protocols/bgp/neighbor[peer-address=*]/",
+    "parameter": "session-state",
+    "monitoring_condition": "admin-state=enable",
+    "resource_filter": [
+        
+    ],
+    "trigger_condition": "!=established",
+    "trigger_message": "oper-down-reason"
+}
+]

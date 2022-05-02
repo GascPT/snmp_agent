@@ -11,9 +11,8 @@ module snmp_agent {
         reference "TBD";
     }
 
-
     grouping snmp_agent-top {
-        description "Top level grouping for snmp_agentsample app";
+        description "Top level grouping for snmp_agent sample app";
         
         container snmp-agent{
             container target{
@@ -22,7 +21,6 @@ module snmp_agent {
                     description "Path of the resource to monitoring";     
                 }            
             }
-
             container monitoring_elements {
                 //presence "presence container";
                 description "Top level enclosing container for snmp_agent sample app 

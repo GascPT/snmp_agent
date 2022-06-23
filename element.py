@@ -18,17 +18,27 @@ class Element:
                 monitoring_condition,
                 resource_filter, 
                 trigger_condition,
-                watched,status):
+                trigger_message,
+                resolution_condition,
+                resolution_message,
+                trap_oid,
+                watched,
+                status):
 
         self._resource = resource
         self._parameter = parameter
         self._monitoring_condition = monitoring_condition
         self._resource_filter = resource_filter
         self._trigger_condition = trigger_condition
+        self._trigger_message = trigger_message
+        self._resolution_condition = resolution_condition
+        self._resolution_message = resolution_message
+        self._trap_oid = trap_oid
         self._watched = watched
         self._paths = {}
         self._monitoring_status = ""
         self._previous_status = status
+        self._traps_generated = 0
 
     def isWatched(self):
         return self._watched
@@ -71,25 +81,22 @@ class Element:
     def getFilter(self):
         return self._resource_filter
 
+
     def getJSONElement(self):
         e = {
-            'element': {
-                'parameter' : 
-                    {'value': f'{self._parameter}'},
-                'monitoring_condition' : 
-                    {'value': f'{self._monitoring_condition}'},
-                'resource_filter' : 
-                    {'value': f'{self._resource_filter}'},
-                'trigger_condition' : 
-                    {'value': f'{self._trigger_condition}'}
-            }
+                'parameter' : f'{self._parameter}',
+                'monitoring_condition' : f'{self._monitoring_condition}',
+                'resource_filter' :f'{self._resource_filter}',
+                'trigger_condition' :f'{self._trigger_condition}',
+                'traps_generated' :f'{self._traps_generated}'
         }
         #log.info(json.dumps(e,indent = 4))
         return e
 
+
     def addPath(self,entry_path,value):
         resource = "/".join(entry_path.split("/")[:-1])
-        self._paths[entry_path] = Element(resource,self._parameter,self._monitoring_condition,self._resource_filter,self._trigger_condition, False,value)
+        self._paths[entry_path] = Element(resource,self._parameter,self._monitoring_condition,self._resource_filter,self._trigger_condition,self._trigger_message,self._resolution_condition,self._resolution_message,self._trap_oid, False,value)
         
 
     def getSubPathsKeys(self):
@@ -101,9 +108,6 @@ class Element:
 
     def addMonitoringPath(self,path):
         self._monitoring_path = path
-
-    #def getMonitoringPath(self):
-    #    return self._monitoring_path
 
     def getMonitoringStatus(self):
         return self._monitoring_status
@@ -128,7 +132,7 @@ class Element:
         return "False" 
 
     def print(self):
-        return f"Element -> \n Resource : {self._resource}\n Parameter : {self._parameter}\n Monitoring : {self._monitoring_condition}\n Resource Filter : {self._resource_filter}\n Trigger Condition : {self._trigger_condition}\n Status : {self._previous_status}\n Monitoring Path : {self.getMonitoringPath()}\n Monitoring Status : {self._monitoring_status}\n"
+        return f"Element -> \n Resource : {self._resource}\n Parameter : {self._parameter}\n Monitoring : {self._monitoring_condition}\n Resource Filter : {self._resource_filter}\n Trigger Condition : {self._trigger_condition}\n Resolution Condition : {self._resolution_condition}\n Status : {self._previous_status}\n Monitoring Path : {self.getMonitoringPath()}\n Monitoring Status : {self._monitoring_status}\n"
             
     
     def verifyIfEntryBelongs(self,log, entry_path, value):
@@ -209,30 +213,51 @@ class Element:
         self._paths[key_path].setMonitoringStatus(value)
         
 
-    def updateStatus(self,log, entry_path, value):
+    def updateStatus(self,log,entry_path,value):
 
         trigger = self._paths[entry_path].getTrigger()
-
+        resolution = self._paths[entry_path].getResolution()
+        trap_oid = self.getTrap_OID()
+        
         if self._paths[entry_path].getStatus() == "": # If previous status are empty
             self._paths[entry_path].setStatus(value)
-            return False
-        
+            return False,"", "", ""
+
+        # TRIGGER SECTION
+        specified_trap_oid = f"{trap_oid}.1"
         if "->" in trigger: # Change from value 1 to value 2
             val1,val2 = trigger.split("->")
             if self._paths[entry_path].getStatus() == val1 and val2 == value:
                 self._paths[entry_path].setStatus(value)
-                return True,"Message"
-            self._paths[entry_path].setStatus(value)
+                return True,self._trigger_message,trap_oid,specified_trap_oid
+            #self._paths[entry_path].setStatus(value)
 
         elif "!=" in trigger: # TODO Different from one value
             val1 = trigger.replace("!=","")
             if self._paths[entry_path].getStatus() == val1 and val1 != value:
                 self._paths[entry_path].setStatus(value)
-                return True,"Message"
-            self._paths[entry_path].setStatus(value)
+                return True,self._trigger_message,trap_oid,specified_trap_oid
+            #self._paths[entry_path].setStatus(value)
             
+        # RESOLUTION SECTION
+        specified_trap_oid = f"{trap_oid}.2"
+        if "->" in resolution: # Change from value 1 to value 2
+            val1,val2 = resolution.split("->")
 
-        return False,""
+            if self._paths[entry_path].getStatus() == val1 and val2 == value:
+                self._paths[entry_path].setStatus(value)
+                return True, self._resolution_message, trap_oid, specified_trap_oid
+            #self._paths[entry_path].setStatus(value)
+
+        elif "==" in resolution: # TODO Different from one value
+            val1 = resolution.replace("==","")
+            if self._paths[entry_path].getStatus() != val1 and val1 == value:
+                self._paths[entry_path].setStatus(value)
+                return True,self._resolution_message,trap_oid,specified_trap_oid
+            #self._paths[entry_path].setStatus(value)
+            
+        self._paths[entry_path].setStatus(value)   
+        return False,"", "", ""
 
     def checkFilter(self,log,entry_path):
         # TODO Verify correctness
@@ -249,3 +274,19 @@ class Element:
         
         return False
     
+
+    def get_traps_generated(self):
+        return self._traps_generated
+
+    def set_traps_generated(self, number):
+        self._traps_generated = number
+
+    def getTrap_OID(self):
+        return self._trap_oid
+
+    def getResolution(self):
+        return self._resolution_condition
+    
+    def getResolutionMessage(self):
+        return self._resolution_message
+        

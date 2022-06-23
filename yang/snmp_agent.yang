@@ -13,18 +13,14 @@ module snmp_agent {
 
     grouping snmp_agent-top {
         description "Top level grouping for snmp_agent sample app";
-        
+
         container snmp-agent{
-            container target{
-                leaf-list address{
-                    type string;
-                    description "Path of the resource to monitoring";     
-                }            
-            }
-            container monitoring_elements {
-                //presence "presence container";
-                description "Top level enclosing container for snmp_agent sample app 
-                            config and operational state data";
+        
+            //presence "presence container";
+            description "Top level enclosing container for snmp_agent sample app 
+                        config and operational state data";
+            
+            container monitoring_elements{
                 list element{
                     key resource;
                     leaf resource {
@@ -55,6 +51,25 @@ module snmp_agent {
                     leaf trigger_message {
                         type string;
                         description "MIB Event";
+                    }
+
+                    leaf traps_generated {
+                        type string;
+                        description "How many traps this element produces";
+                    }
+                }
+            }
+            container targets{
+                list target{
+                    key address;
+                    leaf address {
+                        type string;
+                        mandatory true;
+                        description "Address of target";  
+                    }
+                    leaf network-instance {
+                        type string;
+                        description "Network-instance to use";  
                     }
                 }     
             }

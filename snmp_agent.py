@@ -19,15 +19,6 @@ import re
 
 import sdk_service_pb2
 import sdk_service_pb2_grpc
-import lldp_service_pb2
-import interface_service_pb2
-import networkinstance_service_pb2
-import route_service_pb2
-import route_service_pb2_grpc
-import nexthop_group_service_pb2
-import nexthop_group_service_pb2_grpc
-import mpls_service_pb2
-import mpls_service_pb2_grpc
 import config_service_pb2
 import telemetry_service_pb2
 import telemetry_service_pb2_grpc
@@ -35,6 +26,7 @@ import sdk_common_pb2
 
 from logger import *
 from element import *
+from target import *
 
 # Modules
 from pygnmi.client import gNMIclient,telemetryParser
@@ -48,6 +40,7 @@ agent_name='snmp_agent'
 ## Open a GRPC channel to connect to sdk_mgr on the dut
 ## sdk_mgr will be listening on 50053
 ############################################################
+
 channel = grpc.insecure_channel('127.0.0.1:50053')
 metadata = [('agent_name', agent_name)]
 stub = sdk_service_pb2_grpc.SdkMgrServiceStub(channel)
@@ -61,12 +54,23 @@ queue = queue.Queue()
 
 log = MyLogger("Logger")
 
-#global_paths = ['interface[name=*]/admin-state']
-#global_paths = ['interface[name=ethernet-1/1]/oper-state',
-#                'interface[name=ethernet-1/2]/oper-state']
 global_paths = []
 targets = []
 elements = []
+
+class Credentials():
+    def __init__(self,user,password):
+        self._user = user
+        self._password = password
+
+
+    def getUser(self):
+        return self._user
+
+    def getPassword(self):
+        return self._password
+
+gnmi_credentials = None
 ############################################################
 ## Subscribe to required event
 ## This proc handles subscription of Config
@@ -123,13 +127,15 @@ def Delete_Telemetry(js_path):
 
 def addTargetsToTelemetry() -> None:
     global targets
-    js_path = '.' + agent_name
-    json_content = { "target": { "address": [ ] } }
-
+    #base_path = '.' + agent_name + '.target'
     for t in targets:
-        json_content['target']['address'].append({"value": f'{t}'})  
-    
-    r = Add_Telemetry(js_path,json.dumps(json_content))
+        js_path = f'.{agent_name}.targets.target{{.address=="{t.get_address()}"}}'
+        json_content = { 'network-instance': f'{t.get_nw()}'}       
+                    
+        log.info(json_content)
+        r = Add_Telemetry(js_path,json.dumps(json_content))
+        log.info(str(r.status) + "!" + r.error_str)
+        
 
 def addElementsToTelemetry() -> None:
     global elements
@@ -147,7 +153,7 @@ def addBrackets(phrase: str) -> str:
     return phrase
 
 def addStatusToMemory(obj, filename = None):
-    global targets, elements
+    global targets, elements, gnmi_credentials
     # From Notification
     if filename == None:
         #Check if are target config
@@ -178,9 +184,11 @@ def addStatusToMemory(obj, filename = None):
                     f.seek(0)
                     f.write(json.dumps(file_data, indent=4))
                     f.truncate()
-                
+
+            log.info(obj.config.key.js_path)        
         # Check if are configuration of a element
         elif obj.config.key.js_path == ".snmp_agent.monitoring_elements.element":
+            
             #Check if exits any config 
             if not obj.config.data.json == "{\n}\n":
                 element_json = json.loads(obj.config.data.json)['element']
@@ -197,32 +205,35 @@ def addStatusToMemory(obj, filename = None):
                     trigger_condition = element_json['trigger_condition']['value']
                 else:
                     trigger_condition = ""
-  
-                e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition, False,"")
+                
+                if "trigger_message" in element_json:
+                    trigger_message = element_json['trigger_message']['value']
+                else:
+                    trigger_message = ""
+
+                resolution_condition = element_json['resolution_condition']['value']
+                resolution_message = element_json['resolution_message']['value']
+
+                trap_oid = element_json['trap_oid']['value']
+
+                e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition,trigger_message,trap_oid, False,"")
 
                 # Add element to monitoring to the list of elements
                 elements.append(e)
                 # Add to Telemetry
                 addElementsToTelemetry()
                 # Add to the File
-                # TODO
-                
-
-
+                # TODO               
     # From File
     else:
-        try:
+        try:    
+            time.sleep(2)
             with open(filename) as f:
                 file_data = json.load(f)
-                # Add targets to the global variable       
-                for target in file_data['targets']:
-                    if target not in targets:
-                        t = target['address']
-                        targets.append(t)
-                        
-                # Add Targets to State
-                if not len(targets) == 0:
-                    addTargetsToTelemetry()
+                # Read GNMI Credentials
+                aux = file_data['gnmi_credentials']
+                gnmi_credentials = Credentials(aux['user'],aux['password'])
+                
 
                 # Add Elements to the global variable
                 for element in file_data['monitoring_elements']:
@@ -240,16 +251,30 @@ def addStatusToMemory(obj, filename = None):
                         trigger_condition = ""
                     
                     trigger_message = element['trigger_message']
+                    
+                    resolution_condition = element['resolution_condition']
+                    resolution_message = element['resolution_message']                
+                    
+                    trap_oid = element['trap_oid']
 
-                    e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition, False,"")
-
-                    #log.info(e.print())
+                    e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition,trigger_message,resolution_condition,resolution_message,trap_oid, False,"")
 
                     # Add element to monitoring to the list of elements
                     elements.append(e)
                     # Add to Telemetry
-                    addElementsToTelemetry()
+                addElementsToTelemetry()
 
+                # Add targets to the global variable       
+                for target in file_data['targets']:
+                    if target not in targets:# Check this later
+                        nw_instance = target['nw-instance']
+                        address = target['address']
+                        targets.append(Target(nw_instance,address))
+                        
+                # Add Targets to State
+                if not len(targets) == 0:
+                    #log.info(targets[0].get_address()+"||"+ targets[0].get_nw())
+                    addTargetsToTelemetry()
                     
         except Exception as e:
             logging.info(f"Exception caught while reading file :: {e}")
@@ -279,15 +304,17 @@ def NotificationStreamThread(stream_id):
     stream_response = sub_stub.NotificationStream(stream_request, metadata=metadata)
     
     for r in stream_response:
+        log.info(r.notification)
         for obj in r.notification:
             Handle_Notification(obj)
 
-
+############################################################
+## Function to send keep alives to the NDK
+############################################################
 def send_keep_alive():
     global thread_exit
     while not thread_exit:
         keep_alive_response = stub.KeepAlive(request=sdk_service_pb2.KeepAliveRequest(),metadata=metadata)
-        #log.info("SEND KEEP ALIVE")
         if keep_alive_response.status == sdk_common_pb2.SdkMgrStatus.Value("kSdkMgrFailed"):
             log.error("Keep Alive Failed")
         time.sleep(3)
@@ -313,8 +340,10 @@ def subscribe_thread(paths):
                     'sample_interval': 1000000000
                 }
         )
-             
-    with gNMIclient(target= host, username='admin', password='admin', insecure=True, debug = True) as gc:
+    
+    global gnmi_credentials
+    # TODO VERIFY ERROR GNMI SERVER CLOSE
+    with gNMIclient(target= host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
         telemetry_stream = gc.subscribe(subscribe=subscribe)
 
         #pygnmi implements this 'for' as infinite loop
@@ -324,19 +353,25 @@ def subscribe_thread(paths):
                 queue.put(telemetry_entry_str)
 
 def getGNMIPath(path):
-    with gNMIclient(target = host, username='admin', password='admin', insecure=True, debug = True) as gc:
+    global gnmi_credentials
+    with gNMIclient(target= host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
         return gc.get(path,encoding="json_ietf")
 
+############################################################
+## Function to send SNMP Trap with the apropriate format
+############################################################
+def sendSNMPTrap(msg_entry,target,trap_oid_1,trap_oid_2):  
+    p = f"ip netns exec {target.get_nw()} snmptrap -v 2c -c public {target.get_address()} 0 {trap_oid_1} {trap_oid_2} s \"{msg_entry}\""
 
-# TODO
-def sendSNMPTrap(entry,target):  
+    out = subprocess.run(p, shell=True)
+
     return None
 
 
-def sendToAllTargets(entry):
+def sendToAllTargets(msg_entry,t1,t2):
     global targets
     for target in targets:
-        sendSNMPTrap(entry, target)
+        sendSNMPTrap(msg_entry,target,t1,t2)
     
 
 def addGlobalPaths():
@@ -348,27 +383,6 @@ def addGlobalPaths():
         global_paths.append(path)
         global_paths.append(monitoring_path)
         
-
-def verifyTriggerCondition(element,value):
-    trigger = element.getTrigger()
-
-    if element.getStatus() == "": # If previous status are empty
-        element.setStatus(value)
-        return False
-    
-    if "->" in trigger: # CHange from value 1 to value 2
-        val1,val2 = trigger.split("->")
-        if element.getStatus() == val1 and val2 == value:
-            element.setStatus(value)
-            return True
-        element.setStatus(value)
-
-    elif "!=" in trigger: # TODO Different from one value
-        log.info("TODO: Different from one value to another")
-
-    return False
-
-
 def cleanUPPath(e):
     #log.info("Enter Cleaning Stage")
     pattern = "/[a-zA-Z]+_([a-zA-Z]+(-[a-zA-Z]+)+):"
@@ -398,22 +412,27 @@ def processEntry(entry):
     
         # Can be more than one entry from subscribe
     for e in entry:
-        # log.info("Original Entry : " + str(e))
+        #log.info("Original Entry : " + str(e))
         # Clean up the path removing the model and adding the parameter
         entry_path, value = cleanUPPath(e)  
         for element in elements:
             path = element.getResource()
+
             # Verify if entry belongs to this element
             if element.verifyIfEntryBelongs(log,entry_path,value):
-                
-                # Verify if exists in subpaths
+               
+                # Verify if entry exists in subpaths
                 if entry_path in element.getSubPathsKeys():
                     # Proceed to updates and checks triggers conditions
-                    result, message = element.updateStatus(log,entry_path,value)
-                    
+                    result, event, base_trap_oid, specified_trap_oid = element.updateStatus(log,entry_path,value)
+                    #log.info("Result: " + str(result))
                     if result:
-                        log.info("Original Entry : " + str(e))
-                        log.info(f"SEND SNMP TRAP with message {message}")
+                        #log.info("Original Entry : " + str(e))
+                        log.info(f"SEND SNMP TRAP with the Event: {event}")
+                        sendToAllTargets(event + ": " + entry_path,base_trap_oid,specified_trap_oid)
+                        element.set_traps_generated(element.get_traps_generated() + 1)
+                        # Add to Telemetry
+                        addElementsToTelemetry()
                     break
                     
                 else:
@@ -429,18 +448,12 @@ def processEntry(entry):
 
                     elif not element.verifyIfIsMonitoringPath(entry_path):
                         # First time of the entry
-                        # Check Filter
+                        # Check Resource Filter
                         #log.info("Add Entry for the First Time")
                         if element.checkFilter(log,entry_path):
                             #log.info("Passed on Filter Condition")
                             element.addPath(entry_path,value)
                         break
-
-        
-
-                
-
-
 
 ##################################################################################################
 ## This is the main kproc where all processing for snmp_agent starts.
@@ -468,8 +481,8 @@ def Run():
 
     Subscribe_Notifications(stream_id)
 
-    notificationStreamThread = threading.Thread(target=NotificationStreamThread, args=(stream_id,))
-    notificationStreamThread.start()
+    #notificationStreamThread = threading.Thread(target=NotificationStreamThread, args=(stream_id,))
+    #notificationStreamThread.start()
 
     if os.path.exists('input_elements'):
         addStatusToMemory(None,"input_elements")
@@ -480,9 +493,13 @@ def Run():
 
     ####################################################################################
     # START OF GNMI SUBSCRIBE THREAD
-    log.info(global_paths)
+    #log.info(global_paths)
     x = threading.Thread(target=subscribe_thread, args=(global_paths,))
     x.start()
+    # REtirar depois
+    sub_stub = sdk_service_pb2_grpc.SdkNotificationServiceStub(channel)
+    stream_request = sdk_service_pb2.NotificationStreamRequest(stream_id=stream_id)
+    stream_response = sub_stub.NotificationStream(stream_request, metadata=metadata)
     
     ################################################################################
     # Infinite Loop to send SNMP traps
@@ -493,7 +510,6 @@ def Run():
             entry = entry['update']['update']
             #log.info(f"{entry}  :::::  QUEUE SIZE --> {queue.qsize()}\n ")
             processEntry(entry)
-
 
     sys.exit()
     return True

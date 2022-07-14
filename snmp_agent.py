@@ -35,12 +35,17 @@ from pygnmi.client import gNMIclient,telemetryParser
 ############################################################
 ## Agent will start with this name
 ############################################################
-agent_name='snmp_agent'
+agent_name ='snmp_agent'
+
+############################################################
+## FILENAME of input
+############################################################
+FILENAME = 'input_elements'
+
 ############################################################
 ## Open a GRPC channel to connect to sdk_mgr on the dut
 ## sdk_mgr will be listening on 50053
 ############################################################
-
 channel = grpc.insecure_channel('127.0.0.1:50053')
 metadata = [('agent_name', agent_name)]
 stub = sdk_service_pb2_grpc.SdkMgrServiceStub(channel)
@@ -48,10 +53,11 @@ stub = sdk_service_pb2_grpc.SdkMgrServiceStub(channel)
 ##################################################################################################
 ## This is the Global Variables to the snmp agent to work 
 ##################################################################################################
+# GNMI Server
 host = ('unix:///opt/srlinux/var/run/sr_gnmi_server', 57400)
-
+# Queue with the entries of subscribe function
 queue = queue.Queue()
-
+# Logger Class
 log = MyLogger("Logger")
 
 global_paths = []
@@ -71,6 +77,7 @@ class Credentials():
         return self._password
 
 gnmi_credentials = None
+
 ############################################################
 ## Subscribe to required event
 ## This proc handles subscription of Config
@@ -95,7 +102,7 @@ def Subscribe_Notifications(stream_id):
         log.info("Stream ID not sent.")
         return False
     
-    ##Subscribe to Config Notifications - configs added by the fib-agent
+    ##Subscribe to Config Notifications - configs added by the snmp-agent
     Subscribe(stream_id)
 
 ############################################################
@@ -127,15 +134,21 @@ def Delete_Telemetry(js_path):
 
 def addTargetsToTelemetry() -> None:
     global targets
-    #base_path = '.' + agent_name + '.target'
     for t in targets:
         js_path = f'.{agent_name}.targets.target{{.address=="{t.get_address()}"}}'
         json_content = { 'network-instance': f'{t.get_nw()}'}       
-                    
-        log.info(json_content)
         r = Add_Telemetry(js_path,json.dumps(json_content))
-        log.info(str(r.status) + "!" + r.error_str)
-        
+
+
+def removeTargetsOfTelemetry(address) -> None:
+    js_path = f'.{agent_name}.targets.target{{.address=="{address}"}}'  
+    r = Delete_Telemetry(js_path)
+
+
+def removeElementsOfTelemetry(resource) -> None:
+    js_path = f'.{agent_name}.monitoring_elements.element{{.resource=="{resource}"}}'  
+    r = Delete_Telemetry(js_path)
+
 
 def addElementsToTelemetry() -> None:
     global elements
@@ -152,161 +165,370 @@ def addBrackets(phrase: str) -> str:
         phrase = phrase + '/'
     return phrase
 
+def diffTwoJSONObjects(array_a, array_b):
+    # array_a -> From Memory
+    # array_b -> From File
+    data = []
+    for o in array_a:
+        if not o in array_b:
+            data.append(o)
+    return data
+# ADD STATUS from File or Notification to Memory
 def addStatusToMemory(obj, filename = None):
     global targets, elements, gnmi_credentials
     # From Notification
     if filename == None:
         #Check if are target config
-        if obj.config.key.js_path == ".snmp_agent":
+        if obj.config.key.js_path == ".snmp_agent.targets.target":
             #Check if exits any config 
             if not obj.config.data.json == "{\n}\n":    
                 notification_targets = json.loads(obj.config.data.json) 
-                for target in notification_targets['target']['address']:
-                    if target not in targets:
-                        t = target['value']
-                        targets.append(t)
-                addTargetsToTelemetry() 
 
+                # One notification for entry
+                address = obj.config.key.keys[0]
+                nw_instance = notification_targets['target']['network_instance']['value']
+
+                # Verify if exists in targets
+                flag = False
+                for t in targets:
+                    if t.get_address() == address and t.get_nw() == nw_instance:
+                        flag = True
+
+                             
+                #Add to Telemetry and targets element
+                if not flag:
+                    targets.append(Target(nw_instance,address))
+                    addTargetsToTelemetry() 
+
+                
                 # Add to the File
-                with open("input_elements","r+") as f:
+                with open(FILENAME,"r+") as f:
                     file_data = json.load(f)
                     aux_targets = []
+                    targets_original = []
 
                     for target in file_data['targets']:
-                        aux_targets.append(target['address'])
+                        aux_targets.append(target)
 
                     #Diff between global state targets and targets written on the file 
-                    diff_targets = [x for x in targets if x not in aux_targets]
+                    for t in targets:
+                        targets_original.append(t.get_JSON())
 
-                    for t in diff_targets:
-                        file_data['targets'].append({"address" : t})
-                    
-                    f.seek(0)
-                    f.write(json.dumps(file_data, indent=4))
-                    f.truncate()
+                    diff_targets = diffTwoJSONObjects(targets_original,aux_targets)
 
-            log.info(obj.config.key.js_path)        
+                    if not len(diff_targets) == 0:
+                        for t in diff_targets:
+                            file_data['targets'].append(t)
+                        
+                        f.seek(0)
+                        f.write(json.dumps(file_data, indent=4))
+                        f.truncate()
+
         # Check if are configuration of a element
         elif obj.config.key.js_path == ".snmp_agent.monitoring_elements.element":
-            
             #Check if exits any config 
             if not obj.config.data.json == "{\n}\n":
                 element_json = json.loads(obj.config.data.json)['element']
                 # Desiralization of the elements into variables
                 resource = obj.config.key.keys[0]
+                # Mandatory parameters
                 parameter = element_json['parameter']['value']
-                monitoring_condition = element_json['monitoring_condition']['value'] 
+                trigger_condition = element_json['trigger_condition']['value']
+                trap_oid = element_json['trap_oid']['value']
+
+                # Optional parameters
                 if "resource_filter" in element_json:
                     resource_filter = element_json['resource_filter']['value']
                 else:
                     resource_filter = ""
-                   
-                if "trigger_condition" in element_json:
-                    trigger_condition = element_json['trigger_condition']['value']
-                else:
-                    trigger_condition = ""
                 
+                if "monitoring_condition" in element_json:
+                    monitoring_condition = element_json['monitoring_condition']['value']
+                else:
+                    monitoring_condition = ""
+
                 if "trigger_message" in element_json:
                     trigger_message = element_json['trigger_message']['value']
                 else:
                     trigger_message = ""
 
-                resolution_condition = element_json['resolution_condition']['value']
-                resolution_message = element_json['resolution_message']['value']
+                if "resolution_condition" in element_json:
+                    resolution_condition = element_json['resolution_condition']['value']
+                else:
+                    resolution_condition = ""
 
-                trap_oid = element_json['trap_oid']['value']
+                if "resolution_message" in element_json:
+                    resolution_message = element_json['resolution_message']['value']
+                else:
+                    resolution_message = ""    
+                
 
-                e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition,trigger_message,trap_oid, False,"")
+                element = Element(resource,
+                            parameter,
+                            monitoring_condition,
+                            resource_filter,
+                            trigger_condition,
+                            trigger_message,
+                            resolution_condition,
+                            resolution_message,
+                            trap_oid, 
+                            False,
+                            "")
+               
+                # Verify if exists in elements
+                flag = False
+                for e in elements:
+                    if e.getResource() == resource: # Verify if key list 
+                        flag = True
 
+                             
                 # Add element to monitoring to the list of elements
-                elements.append(e)
-                # Add to Telemetry
-                addElementsToTelemetry()
+                if not flag:
+                    elements.append(element)
+                    # Add to Telemetry
+                    addElementsToTelemetry()
+                log.info(len(elements))
                 # Add to the File
-                # TODO               
+                with open(FILENAME,"r+") as f:
+                    file_data = json.load(f)
+                    aux_elements = []
+                    elements_original = []
+
+                    for element in file_data['monitoring_elements']:
+                        aux_elements.append(element)
+
+                    #Diff between global state elements and elements written on the file 
+                    for e in elements:
+                        elements_original.append(e.getJSON())
+
+                    log.info(f"FROM FILE ->{aux_elements}")
+
+                    log.info(f"\n\nFROM MEMORY ->{elements_original}")  
+
+
+
+                    diff_elements = diffTwoJSONObjects(elements_original,aux_elements)
+                    log.info(f"\n\n\n{diff_elements}")             
+                    if not len(diff_elements) == 0:
+                        for e in diff_elements:
+                            file_data['monitoring_elements'].append(e)
+                        
+                        f.seek(0)
+                        f.write(json.dumps(file_data, indent=4))
+                        f.truncate()              
     # From File
     else:
         try:    
-            time.sleep(2)
             with open(filename) as f:
-                file_data = json.load(f)
+                file_data_as_json = json.load(f)
+
                 # Read GNMI Credentials
-                aux = file_data['gnmi_credentials']
+                aux = file_data_as_json['gnmi_credentials']
                 gnmi_credentials = Credentials(aux['user'],aux['password'])
                 
 
                 # Add Elements to the global variable
-                for element in file_data['monitoring_elements']:
+                for element in file_data_as_json['monitoring_elements']:
                     resource = addBrackets(element['resource'])
+
+                    # Mandatory parameters
                     parameter = element['parameter']
-                    monitoring_condition = element['monitoring_condition']
+                    trigger_condition = element['trigger_condition']
+                    trap_oid = element['trap_oid']
+
+                    # Optional parameters
                     if "resource_filter" in element:
                         resource_filter = element['resource_filter']
                     else:
                         resource_filter = ""
                     
-                    if "trigger_condition" in element:
-                        trigger_condition = element['trigger_condition']
+                    if "monitoring_condition" in element:
+                        monitoring_condition = element['monitoring_condition']
                     else:
-                        trigger_condition = ""
-                    
-                    trigger_message = element['trigger_message']
-                    
-                    resolution_condition = element['resolution_condition']
-                    resolution_message = element['resolution_message']                
-                    
-                    trap_oid = element['trap_oid']
+                        monitoring_condition = ""
 
-                    e = Element(resource,parameter,monitoring_condition,resource_filter,trigger_condition,trigger_message,resolution_condition,resolution_message,trap_oid, False,"")
+                    if "trigger_message" in element:
+                        trigger_message = element['trigger_message']
+                    else:
+                        trigger_message = ""
+
+                    if "resolution_condition" in element:
+                        resolution_condition = element['resolution_condition']
+                    else:
+                        resolution_condition = ""
+
+                    if "resolution_message" in element:
+                        resolution_message = element['resolution_message'] 
+                    else:
+                        resolution_message = ""    
+                    
+
+                    e = Element(resource,
+                                parameter,
+                                monitoring_condition,
+                                resource_filter,
+                                trigger_condition,
+                                trigger_message,
+                                resolution_condition,
+                                resolution_message,
+                                trap_oid, 
+                                False,
+                                "")
 
                     # Add element to monitoring to the list of elements
                     elements.append(e)
-                    # Add to Telemetry
+
+                # Add to Telemetry
                 addElementsToTelemetry()
 
                 # Add targets to the global variable       
-                for target in file_data['targets']:
-                    if target not in targets:# Check this later
+                for target in file_data_as_json['targets']:
+                    flag = False
+                    for t in targets:
+                        if target['address'] == t.get_address() and target['nw-instance'] == t.get_nw():
+                            flag = True
+
+                    if not flag:
                         nw_instance = target['nw-instance']
                         address = target['address']
                         targets.append(Target(nw_instance,address))
                         
                 # Add Targets to State
                 if not len(targets) == 0:
-                    #log.info(targets[0].get_address()+"||"+ targets[0].get_nw())
                     addTargetsToTelemetry()
-                    
+                
+                # Add to Config
+                addStatusToConfigDataStore()
+
+
         except Exception as e:
             logging.info(f"Exception caught while reading file :: {e}")
             #Set programed status as false
             return False
 
+##################################################################
+## Function to introduce memory configuration in Config Datastore
+## Targets and Elements with formated paths
+##################################################################
+def addStatusToConfigDataStore():
+    global elements, targets
+    # Add Targets
+    for t in targets:
+        data = t.gNMISetOperation(log)
+        gnmiSET(data)
+
+    # Add Elements
+    for e in elements:
+        data = e.gNMISetOperation(log)
+        gnmiSET(data)
 
 ##################################################################
-## Proc to process the config Notifications received by fib_agent 
-## At present processing config from js_path = .fib-agent
+## GNMI SET OPERATION
+## input: formatted path to update 
+## return: None
 ##################################################################
-def Handle_Notification(obj):
+def gnmiSET(update_path) -> None:
+    global gnmi_credentials 
+    with gNMIclient(target= host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
+        try:
+            data = gc.set(update=update_path,encoding="json_ietf")
+            #log.info(f"gNMI SET Operation ::: {data}")
+        except Exception as e:
+            log.info(e)
+
+##################################################################
+## Delete Config Operation
+## input: 
+## return: 
+##################################################################
+
+def delStatusofMemory(obj):
+    global elements, targets
+    #REMOVE TARGET ELEMENT
+    if obj.config.key.js_path == ".snmp_agent.targets.target":
+        #Remove From Memory
+        key = obj.config.key.keys[0]
+        for i in range(len(targets)):
+            if targets[i].get_address() == key:
+                targets.pop(i)
+                break
+        
+        # Update Targets to State
+        removeTargetsOfTelemetry(key)
+        # Update Config
+        addStatusToConfigDataStore()
+        
+        #Remove From FIle
+        with open(FILENAME,"r+") as f:
+            file_data = json.load(f) 
+            for i in range(len(file_data['targets'])):
+                if file_data['targets'][i]['address'] == key:
+                    file_data['targets'].pop(i)
+                    break
+
+            f.seek(0)
+            f.write(json.dumps(file_data, indent=4))
+            f.truncate()
+    #REMOVE MONITORING ELEMENT
+    elif obj.config.key.js_path == ".snmp_agent.monitoring_elements.element":
+        #Remove From Memory
+        key = obj.config.key.keys[0]
+        for i in range(len(elements)):
+            if elements[i].getResource() == key:
+                elements.pop(i)
+                break
+        
+
+        # Update Elements to State
+        removeElementsOfTelemetry(key)
+        # Update Config
+        addStatusToConfigDataStore()
+        
+        #Remove From FIle
+        with open(FILENAME,"r+") as f:
+            file_data = json.load(f) 
+            for i in range(len(file_data['monitoring_elements'])):
+                if file_data['monitoring_elements'][i]['resource'] == key:
+                    file_data['monitoring_elements'].pop(i)
+                    break
+
+            f.seek(0)
+            f.write(json.dumps(file_data, indent=4))
+            f.truncate()
+
+##################################################################
+## Proc to process the config Notifications received by snmp_agent
+## At present processing config from js_path = .snmp_agent
+##################################################################
+def Handle_Notification(obj) -> bool:
     if obj.HasField('config') and obj.config.key.js_path != ".commit.end":
-        log.info(f"GOT CONFIG :: {obj.config.key.js_path}")
-        if "snmp_agent" in obj.config.key.js_path:
-            log.info(f"Got config for agent, now will handle it :: \n{obj.config}\
-                            Operation :: {obj.config.op}\nData :: {obj.config.data.json}")
+        if obj.config.op == 0: # Add Config Operation
+            #log.info(f"GOT CONFIG :: {obj.config.key.js_path}")
+            if "snmp_agent" in obj.config.key.js_path:
+            #    log.info(f"Got config for agent, now will handle it :: \n{obj.config}\
+            #                    Operation :: {obj.config.op}\nData :: {obj.config.data.json}")
 
-            addStatusToMemory(obj)
-    
+                addStatusToMemory(obj)
+        elif obj.config.op == 1: # Change Configuration 
+            log.info("Change HANDLER")
+        elif obj.config.op == 2: # Delete Configuration 
+            delStatusofMemory(obj)
+        else:
+            log.info("SOMETHING GONE WRONG")        
     #always return
-    return True
+    return False
 
 def NotificationStreamThread(stream_id):
     sub_stub = sdk_service_pb2_grpc.SdkNotificationServiceStub(channel)
     stream_request = sdk_service_pb2.NotificationStreamRequest(stream_id=stream_id)
     stream_response = sub_stub.NotificationStream(stream_request, metadata=metadata)
-    
+    time.sleep(2)
     for r in stream_response:
-        log.info(r.notification)
+        #log.info(r.notification)
         for obj in r.notification:
             Handle_Notification(obj)
+
+
 
 ############################################################
 ## Function to send keep alives to the NDK
@@ -343,9 +565,8 @@ def subscribe_thread(paths):
     
     global gnmi_credentials
     # TODO VERIFY ERROR GNMI SERVER CLOSE
-    with gNMIclient(target= host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
+    with gNMIclient(target=host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
         telemetry_stream = gc.subscribe(subscribe=subscribe)
-
         #pygnmi implements this 'for' as infinite loop
         for telemetry_entry in telemetry_stream:
             telemetry_entry_str = telemetryParser(telemetry_entry) 
@@ -362,9 +583,7 @@ def getGNMIPath(path):
 ############################################################
 def sendSNMPTrap(msg_entry,target,trap_oid_1,trap_oid_2):  
     p = f"ip netns exec {target.get_nw()} snmptrap -v 2c -c public {target.get_address()} 0 {trap_oid_1} {trap_oid_2} s \"{msg_entry}\""
-
     out = subprocess.run(p, shell=True)
-
     return None
 
 
@@ -409,8 +628,7 @@ def cleanUPPath(e):
 
 def processEntry(entry):
     global elements
-    
-        # Can be more than one entry from subscribe
+    # Can be more than one entry from subscribe
     for e in entry:
         #log.info("Original Entry : " + str(e))
         # Clean up the path removing the model and adding the parameter
@@ -481,26 +699,25 @@ def Run():
 
     Subscribe_Notifications(stream_id)
 
-    #notificationStreamThread = threading.Thread(target=NotificationStreamThread, args=(stream_id,))
-    #notificationStreamThread.start()
+    
 
-    if os.path.exists('input_elements'):
-        addStatusToMemory(None,"input_elements")
+    if os.path.exists(FILENAME):
+        addStatusToMemory(None,FILENAME)
+        time.sleep(0.5)
 
+    
+    notificationStreamThread = threading.Thread(target=NotificationStreamThread, args=(stream_id,))
+    notificationStreamThread.start()
     ####################################################################################
     # Add Global Paths from Elements
     addGlobalPaths()
 
     ####################################################################################
     # START OF GNMI SUBSCRIBE THREAD
-    #log.info(global_paths)
+    ####################################################################################
     x = threading.Thread(target=subscribe_thread, args=(global_paths,))
     x.start()
-    # REtirar depois
-    sub_stub = sdk_service_pb2_grpc.SdkNotificationServiceStub(channel)
-    stream_request = sdk_service_pb2.NotificationStreamRequest(stream_id=stream_id)
-    stream_response = sub_stub.NotificationStream(stream_request, metadata=metadata)
-    
+      
     ################################################################################
     # Infinite Loop to send SNMP traps
     ################################################################################
@@ -539,8 +756,9 @@ if __name__ == '__main__':
     global thread_exit
     thread_exit = False
     signal.signal(signal.SIGTERM, Exit_Gracefully)
-    log.info("START TIME :: {}".format(datetime.datetime.now()))
-
+    log.info("\n\n\n\n\n\n")
+    log.info("\tSTART TIME :: {}".format(datetime.datetime.now()))
+    log.info("\n\n\n\n\n\n")
     if Run():
         log.info('Agent unregistered and agent routes withdrawed from dut')
     else:

@@ -81,7 +81,21 @@ class Element:
     def getFilter(self):
         return self._resource_filter
 
-
+    def getJSON(self):
+        e = {   
+                'resource' : f'{self._resource}',
+                'parameter' : f'{self._parameter}',
+                'monitoring_condition' : f'{self._monitoring_condition}',
+                'resource_filter' : self._resource_filter,
+                'trigger_condition' :f'{self._trigger_condition}',
+                'trigger_message' :f'{self._trigger_message}',
+                'resolution_condition' :f'{self._resolution_condition}',
+                'resolution_message' :f'{self._resolution_message}',
+                'trap_oid' :f'{self._trap_oid}'
+                
+        }
+        #log.info(json.dumps(e,indent = 4))
+        return e
     def getJSONElement(self):
         e = {
                 'parameter' : f'{self._parameter}',
@@ -289,4 +303,24 @@ class Element:
     
     def getResolutionMessage(self):
         return self._resolution_message
-        
+
+    def gNMISetOperation(self,log):    
+        data = [
+            (
+                "snmp_agent:snmp-agent/monitoring_elements",
+                {"element": {
+                        "resource": f"{self._resource}",
+                        "parameter": f"{self._parameter}",
+                        "monitoring_condition": f"{self._monitoring_condition}",
+                        "trigger_condition": f"{self._trigger_condition}",
+                        "trigger_message": f"{self._trigger_message}",
+                        "resolution_condition": f"{self._resolution_condition}",
+                        "resolution_message": f"{self._resolution_message}",
+                        "trap_oid": f"{self._trap_oid}"
+                    }
+                }  
+            )
+        ]
+        #log.info(data)
+        return data
+

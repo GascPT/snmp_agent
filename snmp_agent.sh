@@ -25,7 +25,7 @@ function main()
     sr_cli --candidate-mode --commit-at-end system gnmi-server unix-socket admin-state enable
 
     source "${virtual_env}"
-    export  PYTHONPATH="$PYTHONPATH:/etc/opt/srlinux/appmgr/user_agents:/opt/srlinux/bin:/usr/lib/python3.6/site-packages/sdk_protos:/etc/opt/srlinux/appmgr/venv-dev/lib/python3.6/site-packages"
+    export PYTHONPATH="$PYTHONPATH:/etc/opt/srlinux/appmgr/user_agents:/opt/srlinux/bin:/usr/lib/python3.6/site-packages/sdk_protos:/etc/opt/srlinux/appmgr/venv-dev/lib/python3.6/site-packages"
     export http_proxy=""
     export https_proxy=""
     python3 ${main_module} &

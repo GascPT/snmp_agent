@@ -1,5 +1,5 @@
 module snmp_agent {
-    yang-version "1";
+    yang-version "1.1";
 
     // namespace
     namespace "urn:srl_test/snmp-agent";
@@ -35,26 +35,37 @@ module snmp_agent {
                     }
                     leaf monitoring_condition {
                         type string;
-                        mandatory true;
                         description "Element status to keep track";
                     }
                     leaf-list resource_filter {
                         type string;
                         description "Filter";
                     }
-
                     leaf trigger_condition {
                         type string;
+                        mandatory true;
                         description "Condition that will trigger the trap";
                     }
-
                     leaf trigger_message {
                         type string;
                         description "MIB Event";
                     }
-
+                    leaf resolution_condition {
+                        type string;
+                        description "Resolution Trigger Condition";
+                    }
+                    leaf resolution_message {
+                        type string;
+                        description "Resolution message";
+                    }
+                    leaf trap_oid {
+                        type string;
+                        mandatory true;
+                        description "Trap OID to use";
+                    }
                     leaf traps_generated {
                         type string;
+                        config false;                  
                         description "How many traps this element produces";
                     }
                 }

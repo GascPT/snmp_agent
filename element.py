@@ -1,15 +1,4 @@
-#"monitoring_elements":[
-#        {
-#            "resource":"interface[name=*]/",
-#            "parameter":"oper-state", 
-#            "monitoring_condition":"admin-state=enable",    
-#            "resource_filter":"ethernet*", 
-#            "trigger_condition":"up -> down",
-#            "trigger_message":"oper-down-reason"
-#        }
-#    ]
 import re
-
 
 class Element: 
     def __init__(self, 
@@ -46,6 +35,10 @@ class Element:
     def setWatched(self,watched):
         self._watched = watched
         return self._watched
+
+    def getMonitoringCondition(self):
+        return self._monitoring_condition
+
 
     def getPath(self):
         return self._resource + self._parameter
@@ -94,17 +87,23 @@ class Element:
                 'trap_oid' :f'{self._trap_oid}'
                 
         }
-        #log.info(json.dumps(e,indent = 4))
         return e
+
+
     def getJSONElement(self):
-        e = {
+        e = {   
+                'resource' : f'{self._resource}',
                 'parameter' : f'{self._parameter}',
                 'monitoring_condition' : f'{self._monitoring_condition}',
-                'resource_filter' :f'{self._resource_filter}',
+                'resource_filter' : self._resource_filter,
                 'trigger_condition' :f'{self._trigger_condition}',
+                'trigger_message' :f'{self._trigger_message}',
+                'resolution_condition' :f'{self._resolution_condition}',
+                'resolution_message' :f'{self._resolution_message}',
+                'trap_oid' :f'{self._trap_oid}',
                 'traps_generated' :f'{self._traps_generated}'
+                
         }
-        #log.info(json.dumps(e,indent = 4))
         return e
 
 
@@ -244,38 +243,65 @@ class Element:
             if self._paths[entry_path].getStatus() == val1 and val2 == value:
                 self._paths[entry_path].setStatus(value)
                 return True,self._trigger_message,trap_oid,specified_trap_oid
-            #self._paths[entry_path].setStatus(value)
-
-        elif "!=" in trigger: # TODO Different from one value
+            
+        elif "!=" in trigger:
             val1 = trigger.replace("!=","")
             if self._paths[entry_path].getStatus() == val1 and val1 != value:
                 self._paths[entry_path].setStatus(value)
                 return True,self._trigger_message,trap_oid,specified_trap_oid
-            #self._paths[entry_path].setStatus(value)
+
+        elif "<" in trigger:
+            val1 = trigger.replace("<","")
+            if self._paths[entry_path].getStatus() > val1 and val1 > value:
+                self._paths[entry_path].setStatus(value)
+                return True,self._trigger_message,trap_oid,specified_trap_oid
+        
+        elif ">" in trigger:
+            val1 = trigger.replace(">","")
+            if self._paths[entry_path].getStatus() < val1 and val1 < value:
+                self._paths[entry_path].setStatus(value)
+                return True,self._trigger_message,trap_oid,specified_trap_oid
+            
             
         # RESOLUTION SECTION
         specified_trap_oid = f"{trap_oid}.2"
         if "->" in resolution: # Change from value 1 to value 2
             val1,val2 = resolution.split("->")
-
             if self._paths[entry_path].getStatus() == val1 and val2 == value:
                 self._paths[entry_path].setStatus(value)
                 return True, self._resolution_message, trap_oid, specified_trap_oid
-            #self._paths[entry_path].setStatus(value)
-
+            
         elif "==" in resolution: # TODO Different from one value
             val1 = resolution.replace("==","")
             if self._paths[entry_path].getStatus() != val1 and val1 == value:
                 self._paths[entry_path].setStatus(value)
                 return True,self._resolution_message,trap_oid,specified_trap_oid
-            #self._paths[entry_path].setStatus(value)
+        
+        elif "<" in resolution:
+            val1 = resolution.replace("<","")
+            if self._paths[entry_path].getStatus() > val1 and val1 > value:
+                self._paths[entry_path].setStatus(value)
+                return True,self._resolution_message,trap_oid,specified_trap_oid
+        
+        elif ">" in resolution:
+            val1 = resolution.replace(">","")
+            if self._paths[entry_path].getStatus() < val1 and val1 < value:
+                self._paths[entry_path].setStatus(value)
+                return True,self._resolution_message,trap_oid,specified_trap_oid
             
         self._paths[entry_path].setStatus(value)   
         return False,"", "", ""
 
     def checkFilter(self,log,entry_path):
-        # TODO Verify correctness
+        # TODO Verify correctness 
+
+        # If dont exist key in path 
+        if not "[" in entry_path and not "]" in entry_path:
+            return True
+
         entry_key = entry_path.split('[')[1].lstrip().split(']')[0].split('=')[1]
+        
+
         if len(self._resource_filter) == 0:
             return True
 
@@ -312,6 +338,7 @@ class Element:
                         "resource": f"{self._resource}",
                         "parameter": f"{self._parameter}",
                         "monitoring_condition": f"{self._monitoring_condition}",
+                        "resource_filter": self._resource_filter,
                         "trigger_condition": f"{self._trigger_condition}",
                         "trigger_message": f"{self._trigger_message}",
                         "resolution_condition": f"{self._resolution_condition}",
@@ -321,6 +348,5 @@ class Element:
                 }  
             )
         ]
-        #log.info(data)
         return data
 

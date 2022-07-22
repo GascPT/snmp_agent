@@ -50,9 +50,9 @@ channel = grpc.insecure_channel('127.0.0.1:50053')
 metadata = [('agent_name', agent_name)]
 stub = sdk_service_pb2_grpc.SdkMgrServiceStub(channel)
 
-##################################################################################################
+############################################################
 ## This is the Global Variables to the snmp agent to work 
-##################################################################################################
+############################################################
 # GNMI Server
 host = ('unix:///opt/srlinux/var/run/sr_gnmi_server', 57400)
 # Queue with the entries of subscribe function
@@ -153,10 +153,10 @@ def removeElementsOfTelemetry(resource) -> None:
 def addElementsToTelemetry() -> None:
     global elements
     base_path = '.' + agent_name + ".monitoring_elements.element"
-    for te in elements:
-        js_key = te.getKey()
+    for e in elements:
+        js_key = e.getKey()
         js_path = base_path + f'{{.resource=="{js_key}"}}'
-        json_content = te.getJSONElement()  
+        json_content = e.getJSONElement()  
         r = Add_Telemetry(js_path,json.dumps(json_content))
 
 
@@ -287,7 +287,7 @@ def addStatusToMemory(obj, filename = None):
                     elements.append(element)
                     # Add to Telemetry
                     addElementsToTelemetry()
-                log.info(len(elements))
+
                 # Add to the File
                 with open(FILENAME,"r+") as f:
                     file_data = json.load(f)
@@ -301,14 +301,8 @@ def addStatusToMemory(obj, filename = None):
                     for e in elements:
                         elements_original.append(e.getJSON())
 
-                    log.info(f"FROM FILE ->{aux_elements}")
-
-                    log.info(f"\n\nFROM MEMORY ->{elements_original}")  
-
-
-
                     diff_elements = diffTwoJSONObjects(elements_original,aux_elements)
-                    log.info(f"\n\n\n{diff_elements}")             
+            
                     if not len(diff_elements) == 0:
                         for e in diff_elements:
                             file_data['monitoring_elements'].append(e)
@@ -362,7 +356,6 @@ def addStatusToMemory(obj, filename = None):
                     else:
                         resolution_message = ""    
                     
-
                     e = Element(resource,
                                 parameter,
                                 monitoring_condition,
@@ -406,10 +399,10 @@ def addStatusToMemory(obj, filename = None):
             #Set programed status as false
             return False
 
-##################################################################
-## Function to introduce memory configuration in Config Datastore
+############################################################
+## Function to introduce memory in Config Datastore
 ## Targets and Elements with formated paths
-##################################################################
+############################################################
 def addStatusToConfigDataStore():
     global elements, targets
     # Add Targets
@@ -422,11 +415,11 @@ def addStatusToConfigDataStore():
         data = e.gNMISetOperation(log)
         gnmiSET(data)
 
-##################################################################
+############################################################
 ## GNMI SET OPERATION
 ## input: formatted path to update 
 ## return: None
-##################################################################
+############################################################
 def gnmiSET(update_path) -> None:
     global gnmi_credentials 
     with gNMIclient(target= host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
@@ -436,11 +429,11 @@ def gnmiSET(update_path) -> None:
         except Exception as e:
             log.info(e)
 
-##################################################################
+############################################################
 ## Delete Config Operation
 ## input: 
 ## return: 
-##################################################################
+############################################################
 
 def delStatusofMemory(obj):
     global elements, targets
@@ -564,7 +557,7 @@ def subscribe_thread(paths):
         )
     
     global gnmi_credentials
-    # TODO VERIFY ERROR GNMI SERVER CLOSE
+
     with gNMIclient(target=host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
         telemetry_stream = gc.subscribe(subscribe=subscribe)
         #pygnmi implements this 'for' as infinite loop
@@ -591,19 +584,21 @@ def sendToAllTargets(msg_entry,t1,t2):
     global targets
     for target in targets:
         sendSNMPTrap(msg_entry,target,t1,t2)
-    
+
 
 def addGlobalPaths():
     global global_paths,elements
     for element in elements:
-        path = element.getPath()
-        monitoring_path = element.getMonitoringPath()
         #Populate global paths with subscribe paths
+        path = element.getPath()
         global_paths.append(path)
-        global_paths.append(monitoring_path)
-        
+        #
+        if not element.getMonitoringCondition() == "":
+            monitoring_path = element.getMonitoringPath()
+            global_paths.append(monitoring_path)
+
+
 def cleanUPPath(e):
-    #log.info("Enter Cleaning Stage")
     pattern = "/[a-zA-Z]+_([a-zA-Z]+(-[a-zA-Z]+)+):"
     clean_path  = e['path']
     
@@ -616,7 +611,7 @@ def cleanUPPath(e):
     if ":" in clean_path:
         log.info("Error: Exitence of \":\" in path ")
 
-    # ADD PATH + PARAMETER
+    # ADD: PATH + PARAMETER
     if isinstance(e['val'],str): # Entry with parameter in the path
         value = e['val']
         entry_path = clean_path
@@ -626,19 +621,20 @@ def cleanUPPath(e):
 
     return entry_path,value
 
+
 def processEntry(entry):
     global elements
     # Can be more than one entry from subscribe
     for e in entry:
-        #log.info("Original Entry : " + str(e))
+        log.info("Original Entry : " + str(e))
         # Clean up the path removing the model and adding the parameter
         entry_path, value = cleanUPPath(e)  
+        #log.info("Clean Stage: " + str(entry_path))
         for element in elements:
             path = element.getResource()
-
             # Verify if entry belongs to this element
             if element.verifyIfEntryBelongs(log,entry_path,value):
-               
+                #log.info("Entry Belongs")
                 # Verify if entry exists in subpaths
                 if entry_path in element.getSubPathsKeys():
                     # Proceed to updates and checks triggers conditions
@@ -694,12 +690,9 @@ def Run():
         log.info("Notification register Failed")
 
     stream_id = create_subscription_response.stream_id
-    
     log.info(f"Create subscription response received. Stream_id : {stream_id}")
-
     Subscribe_Notifications(stream_id)
 
-    
 
     if os.path.exists(FILENAME):
         addStatusToMemory(None,FILENAME)
@@ -710,6 +703,7 @@ def Run():
     notificationStreamThread.start()
     ####################################################################################
     # Add Global Paths from Elements
+    ####################################################################################
     addGlobalPaths()
 
     ####################################################################################

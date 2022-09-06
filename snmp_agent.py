@@ -434,7 +434,6 @@ def gnmiSET(update_path) -> None:
 ## input: 
 ## return: 
 ############################################################
-
 def delStatusofMemory(obj):
     global elements, targets
     #REMOVE TARGET ELEMENT
@@ -451,7 +450,7 @@ def delStatusofMemory(obj):
         # Update Config
         addStatusToConfigDataStore()
         
-        #Remove From FIle
+        #Remove From File
         with open(FILENAME,"r+") as f:
             file_data = json.load(f) 
             for i in range(len(file_data['targets'])):
@@ -503,7 +502,7 @@ def Handle_Notification(obj) -> bool:
 
                 addStatusToMemory(obj)
         elif obj.config.op == 1: # Change Configuration 
-            log.info("Change HANDLER")
+            log.info("Change HANDLER") # TODO
         elif obj.config.op == 2: # Delete Configuration 
             delStatusofMemory(obj)
         else:

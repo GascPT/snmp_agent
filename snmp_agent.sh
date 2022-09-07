@@ -20,7 +20,7 @@ function main()
 
     # source the virtual-environment, which is used to ensure the correct python packages are installed,
     # and the correct python version is used
-    # ACTIVE GNMI SERVER
+    # ACTIVATE THE GNMI SERVER
     sr_cli --candidate-mode --commit-at-end system gnmi-server admin-state enable
     sr_cli --candidate-mode --commit-at-end system gnmi-server unix-socket admin-state enable
 

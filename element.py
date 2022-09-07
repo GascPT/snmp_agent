@@ -350,3 +350,22 @@ class Element:
         ]
         return data
 
+    def setChangeOperation(self,  
+                parameter, 
+                monitoring_condition,
+                resource_filter, 
+                trigger_condition,
+                trigger_message,
+                resolution_condition,
+                resolution_message,
+                trap_oid
+                ):
+
+        self._parameter = parameter
+        self._monitoring_condition = monitoring_condition
+        self._resource_filter = resource_filter
+        self._trigger_condition = trigger_condition
+        self._trigger_message = trigger_message
+        self._resolution_condition = resolution_condition
+        self._resolution_message = resolution_message
+        self._trap_oid = trap_oid

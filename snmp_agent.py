@@ -30,8 +30,10 @@ from target import *
 
 # Modules
 from pygnmi.client import gNMIclient,telemetryParser
+############################################################
+#                       Variables
+############################################################
 
-# Variables
 ############################################################
 ## Agent will start with this name
 ############################################################
@@ -55,15 +57,19 @@ stub = sdk_service_pb2_grpc.SdkMgrServiceStub(channel)
 ############################################################
 # GNMI Server
 host = ('unix:///opt/srlinux/var/run/sr_gnmi_server', 57400)
+
 # Queue with the entries of subscribe function
 queue = queue.Queue()
+
 # Logger Class
 log = MyLogger("Logger")
 
+# Main Variables of the agent
 global_paths = []
 targets = []
 elements = []
 
+#Credentials Class that willl save the gNMI Credentials in runtime
 class Credentials():
     def __init__(self,user,password):
         self._user = user
@@ -132,6 +138,10 @@ def Delete_Telemetry(js_path):
     telemetry_response = telemetry_stub.TelemetryDelete(request=telemetry_delete_request, metadata=metadata)
     return telemetry_response
 
+############################################################
+## Function to add List of Targets from memory
+## to telemetry 
+############################################################
 def addTargetsToTelemetry() -> None:
     global targets
     for t in targets:
@@ -139,17 +149,18 @@ def addTargetsToTelemetry() -> None:
         json_content = { 'network-instance': f'{t.get_nw()}'}       
         r = Add_Telemetry(js_path,json.dumps(json_content))
 
-
+############################################################
+## Function to remove List of Targets from memory
+## to telemetry 
+############################################################
 def removeTargetsOfTelemetry(address) -> None:
     js_path = f'.{agent_name}.targets.target{{.address=="{address}"}}'  
     r = Delete_Telemetry(js_path)
 
-
-def removeElementsOfTelemetry(resource) -> None:
-    js_path = f'.{agent_name}.monitoring_elements.element{{.resource=="{resource}"}}'  
-    r = Delete_Telemetry(js_path)
-
-
+############################################################
+## Function to add List of Elements from memory
+## to telemetry 
+############################################################
 def addElementsToTelemetry() -> None:
     global elements
     base_path = '.' + agent_name + ".monitoring_elements.element"
@@ -159,12 +170,24 @@ def addElementsToTelemetry() -> None:
         json_content = e.getJSONElement()  
         r = Add_Telemetry(js_path,json.dumps(json_content))
 
+############################################################
+## Function to remove List of Elements from memory
+## to telemetry 
+############################################################
+def removeElementsOfTelemetry(resource) -> None:
+    js_path = f'.{agent_name}.monitoring_elements.element{{.resource=="{resource}"}}'  
+    r = Delete_Telemetry(js_path)
 
+############################################################
+##                  Auxiliar Functions
+############################################################
+# Add Slash in final of a string
 def addBrackets(phrase: str) -> str:
     if not phrase.endswith('/'):
         phrase = phrase + '/'
     return phrase
 
+# Difference between 2 JSON Objects
 def diffTwoJSONObjects(array_a, array_b):
     # array_a -> From Memory
     # array_b -> From File
@@ -173,7 +196,8 @@ def diffTwoJSONObjects(array_a, array_b):
         if not o in array_b:
             data.append(o)
     return data
-# ADD STATUS from File or Notification to Memory
+
+# Add STATUS from File or Notification to Memory
 def addStatusToMemory(obj, filename = None):
     global targets, elements, gnmi_credentials
     # From Notification
@@ -238,9 +262,9 @@ def addStatusToMemory(obj, filename = None):
 
                 # Optional parameters
                 if "resource_filter" in element_json:
-                    resource_filter = element_json['resource_filter']['value']
+                    resource_filter = [x['value'] for x in element_json['resource_filter']]
                 else:
-                    resource_filter = ""
+                    resource_filter = []
                 
                 if "monitoring_condition" in element_json:
                     monitoring_condition = element_json['monitoring_condition']['value']
@@ -334,7 +358,7 @@ def addStatusToMemory(obj, filename = None):
                     if "resource_filter" in element:
                         resource_filter = element['resource_filter']
                     else:
-                        resource_filter = ""
+                        resource_filter = []
                     
                     if "monitoring_condition" in element:
                         monitoring_condition = element['monitoring_condition']
@@ -431,7 +455,7 @@ def gnmiSET(update_path) -> None:
 
 ############################################################
 ## Delete Config Operation
-## input: 
+## input: obj
 ## return: 
 ############################################################
 def delStatusofMemory(obj):
@@ -488,6 +512,117 @@ def delStatusofMemory(obj):
             f.write(json.dumps(file_data, indent=4))
             f.truncate()
 
+
+
+
+
+def changeStatusOfMemory(obj):
+    log.info(obj)
+    #Check if are target config
+    if obj.config.key.js_path == ".snmp_agent.targets.target":
+        #Check if exits any config 
+        if not obj.config.data.json == "{\n}\n":
+            #Return the JSON from the object    
+            notification_target = json.loads(obj.config.data.json) 
+
+            # One notification for entry
+            address = obj.config.key.keys[0]
+            nw_instance = notification_target['target']['network_instance']['value']
+
+            for t in targets:
+                if t.get_address() == address :
+                    t.set_nw(nw_instance)
+                           
+            #Add to Telemetry and targets element
+            addTargetsToTelemetry() 
+            
+            # Add to the File
+            with open(FILENAME,"r+") as f:
+                file_data = json.load(f)
+                
+                for target in file_data['targets']:
+                    if target['address'] == address:
+                        target['nw-instance'] = nw_instance
+                
+                # Eliminate duplicates 
+                aux_targets = []
+                for target in file_data['targets']:
+                    if target not in aux_targets :
+                        aux_targets.append(target)
+
+                file_data['targets'] = aux_targets 
+
+                f.seek(0)
+                f.write(json.dumps(file_data, indent=4))
+                f.truncate()
+
+    # Check if are configuration of a element
+    elif obj.config.key.js_path == ".snmp_agent.monitoring_elements.element":
+        #Check if exits any config 
+        if not obj.config.data.json == "{\n}\n":
+            element_json = json.loads(obj.config.data.json)['element']
+            # Desiralization of the elements into variables
+            resource = obj.config.key.keys[0]
+            # Mandatory parameters
+            parameter = element_json['parameter']['value']
+            trigger_condition = element_json['trigger_condition']['value']
+            trap_oid = element_json['trap_oid']['value']
+
+            # Optional parameters
+            if "resource_filter" in element_json:
+                resource_filter = [x['value'] for x in element_json['resource_filter']]
+            else:
+                resource_filter = []
+            
+            if "monitoring_condition" in element_json:
+                monitoring_condition = element_json['monitoring_condition']['value']
+            else:
+                monitoring_condition = ""
+
+            if "trigger_message" in element_json:
+                trigger_message = element_json['trigger_message']['value']
+            else:
+                trigger_message = ""
+
+            if "resolution_condition" in element_json:
+                resolution_condition = element_json['resolution_condition']['value']
+            else:
+                resolution_condition = ""
+
+            if "resolution_message" in element_json:
+                resolution_message = element_json['resolution_message']['value']
+            else:
+                resolution_message = ""    
+            
+
+            for e in elements:
+                if e.getResource() == resource: # Verify if key list 
+                    e.setChangeOperation(parameter, 
+                                        monitoring_condition,
+                                        resource_filter, 
+                                        trigger_condition,
+                                        trigger_message,
+                                        resolution_condition,
+                                        resolution_message,
+                                        trap_oid)
+                            
+            addElementsToTelemetry()
+
+            # Add to the File
+            with open(FILENAME,"r+") as f:
+                file_data = json.load(f)
+                elements_original = []
+
+                for e in elements:
+                    elements_original.append(e.getJSON())
+
+                file_data['monitoring_elements'] = elements_original
+                    
+                f.seek(0)
+                f.write(json.dumps(file_data, indent=4))
+                f.truncate()              
+
+
 ##################################################################
 ## Proc to process the config Notifications received by snmp_agent
 ## At present processing config from js_path = .snmp_agent
@@ -495,14 +630,11 @@ def delStatusofMemory(obj):
 def Handle_Notification(obj) -> bool:
     if obj.HasField('config') and obj.config.key.js_path != ".commit.end":
         if obj.config.op == 0: # Add Config Operation
-            #log.info(f"GOT CONFIG :: {obj.config.key.js_path}")
             if "snmp_agent" in obj.config.key.js_path:
-            #    log.info(f"Got config for agent, now will handle it :: \n{obj.config}\
-            #                    Operation :: {obj.config.op}\nData :: {obj.config.data.json}")
-
                 addStatusToMemory(obj)
         elif obj.config.op == 1: # Change Configuration 
             log.info("Change HANDLER") # TODO
+            changeStatusOfMemory(obj)
         elif obj.config.op == 2: # Delete Configuration 
             delStatusofMemory(obj)
         else:

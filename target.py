@@ -24,3 +24,9 @@ class Target:
                     "nw-instance": self._nw_instance,
                     "address": self._address
                 }
+
+    def set_nw(self,nw):
+        self._nw_instance = nw
+
+    def set_address(self,address):
+        self._address = address

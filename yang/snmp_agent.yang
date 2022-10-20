@@ -82,6 +82,11 @@ module snmp_agent {
                         type string;
                         description "Network-instance to use";  
                     }
+
+                    leaf community-string {
+                        type string;
+                        description "Community-string to use";  
+                    }
                 }     
             }
         }      

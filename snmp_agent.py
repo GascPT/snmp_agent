@@ -69,6 +69,8 @@ global_paths = []
 targets = []
 elements = []
 
+subscribe_thread_object = ""
+
 #Credentials Class that willl save the gNMI Credentials in runtime
 class Credentials():
     def __init__(self,user,password):
@@ -146,7 +148,8 @@ def addTargetsToTelemetry() -> None:
     global targets
     for t in targets:
         js_path = f'.{agent_name}.targets.target{{.address=="{t.get_address()}"}}'
-        json_content = { 'network-instance': f'{t.get_nw()}'}       
+        json_content = { 'network-instance': f'{t.get_nw()}',
+                            }       
         r = Add_Telemetry(js_path,json.dumps(json_content))
 
 ############################################################
@@ -207,10 +210,11 @@ def addStatusToMemory(obj, filename = None):
             #Check if exits any config 
             if not obj.config.data.json == "{\n}\n":    
                 notification_targets = json.loads(obj.config.data.json) 
-
+                log.info(notification_targets)
                 # One notification for entry
                 address = obj.config.key.keys[0]
                 nw_instance = notification_targets['target']['network_instance']['value']
+                community_string = notification_targets['target']['community_string']['value']
 
                 # Verify if exists in targets
                 flag = False
@@ -221,7 +225,7 @@ def addStatusToMemory(obj, filename = None):
                              
                 #Add to Telemetry and targets element
                 if not flag:
-                    targets.append(Target(nw_instance,address))
+                    targets.append(Target(nw_instance,address,community_string))
                     addTargetsToTelemetry() 
 
                 
@@ -315,25 +319,35 @@ def addStatusToMemory(obj, filename = None):
                 # Add to the File
                 with open(FILENAME,"r+") as f:
                     file_data = json.load(f)
-                    aux_elements = []
                     elements_original = []
 
-                    for element in file_data['monitoring_elements']:
-                        aux_elements.append(element)
-
-                    #Diff between global state elements and elements written on the file 
                     for e in elements:
                         elements_original.append(e.getJSON())
 
-                    diff_elements = diffTwoJSONObjects(elements_original,aux_elements)
+                    file_data['monitoring_elements'] = elements_original
+
+                    #file_data = json.load(f)
+                    #aux_elements = []
+                    #elements_original = []
+
+                    #for element in file_data['monitoring_elements']:
+                    #    aux_elements.append(element)
+
+                    #Diff between global state elements and elements written on the file 
+                    #for e in elements:
+                    #    elements_original.append(e.getJSON())
+
+                    #diff_elements = diffTwoJSONObjects(elements_original,aux_elements)
             
-                    if not len(diff_elements) == 0:
-                        for e in diff_elements:
-                            file_data['monitoring_elements'].append(e)
-                        
-                        f.seek(0)
-                        f.write(json.dumps(file_data, indent=4))
-                        f.truncate()              
+                    #if not len(diff_elements) == 0:
+                    #    for e in diff_elements:
+                    #        file_data['monitoring_elements'].append(e)
+  
+                    f.seek(0)
+                    f.write(json.dumps(file_data, indent=4))
+                    f.truncate()
+
+    
     # From File
     else:
         try:    
@@ -408,7 +422,8 @@ def addStatusToMemory(obj, filename = None):
                     if not flag:
                         nw_instance = target['nw-instance']
                         address = target['address']
-                        targets.append(Target(nw_instance,address))
+                        community_string = target['community_string']
+                        targets.append(Target(nw_instance,address,community_string))
                         
                 # Add Targets to State
                 if not len(targets) == 0:
@@ -473,7 +488,7 @@ def delStatusofMemory(obj):
         removeTargetsOfTelemetry(key)
         # Update Config
         addStatusToConfigDataStore()
-        
+        log.info("ENTROU AQUI")
         #Remove From File
         with open(FILENAME,"r+") as f:
             file_data = json.load(f) 
@@ -485,6 +500,7 @@ def delStatusofMemory(obj):
             f.seek(0)
             f.write(json.dumps(file_data, indent=4))
             f.truncate()
+
     #REMOVE MONITORING ELEMENT
     elif obj.config.key.js_path == ".snmp_agent.monitoring_elements.element":
         #Remove From Memory
@@ -500,7 +516,7 @@ def delStatusofMemory(obj):
         # Update Config
         addStatusToConfigDataStore()
         
-        #Remove From FIle
+        #Remove From File
         with open(FILENAME,"r+") as f:
             file_data = json.load(f) 
             for i in range(len(file_data['monitoring_elements'])):
@@ -517,7 +533,7 @@ def delStatusofMemory(obj):
 
 
 def changeStatusOfMemory(obj):
-    log.info(obj)
+    #log.info(obj)
     #Check if are target config
     if obj.config.key.js_path == ".snmp_agent.targets.target":
         #Check if exits any config 
@@ -617,7 +633,7 @@ def changeStatusOfMemory(obj):
                     elements_original.append(e.getJSON())
 
                 file_data['monitoring_elements'] = elements_original
-                    
+ 
                 f.seek(0)
                 f.write(json.dumps(file_data, indent=4))
                 f.truncate()              
@@ -629,13 +645,15 @@ def changeStatusOfMemory(obj):
 ##################################################################
 def Handle_Notification(obj) -> bool:
     if obj.HasField('config') and obj.config.key.js_path != ".commit.end":
+        log.info(f"OPeration:{obj.config.op}")
         if obj.config.op == 0: # Add Config Operation
             if "snmp_agent" in obj.config.key.js_path:
                 addStatusToMemory(obj)
         elif obj.config.op == 1: # Change Configuration 
-            log.info("Change HANDLER") # TODO
+            
             changeStatusOfMemory(obj)
         elif obj.config.op == 2: # Delete Configuration 
+            log.info("Delete HANDLER")
             delStatusofMemory(obj)
         else:
             log.info("SOMETHING GONE WRONG")        
@@ -706,7 +724,7 @@ def getGNMIPath(path):
 ## Function to send SNMP Trap with the apropriate format
 ############################################################
 def sendSNMPTrap(msg_entry,target,trap_oid_1,trap_oid_2):  
-    p = f"ip netns exec {target.get_nw()} snmptrap -v 2c -c public {target.get_address()} 0 {trap_oid_1} {trap_oid_2} s \"{msg_entry}\""
+    p = f"ip netns exec {target.get_nw()} snmptrap -v 2c -c {target.get_community_string()} {target.get_address()} 0 {trap_oid_1} {trap_oid_2} s \"{msg_entry}\""
     out = subprocess.run(p, shell=True)
     return None
 
@@ -809,6 +827,7 @@ def processEntry(entry):
 def Run():
     response = stub.AgentRegister(request=sdk_service_pb2.AgentRegistrationRequest(agent_liveliness=5), metadata=metadata)
     log.info(f"Registration response : {response.status}")
+    global subscribe_thread_object
 
     # Send Keep Alives
     th = threading.Thread(target=send_keep_alive)
@@ -840,9 +859,9 @@ def Run():
     ####################################################################################
     # START OF GNMI SUBSCRIBE THREAD
     ####################################################################################
-    x = threading.Thread(target=subscribe_thread, args=(global_paths,))
-    x.start()
-      
+    subscribe_thread_object = threading.Thread(target=subscribe_thread, args=(global_paths,))
+    subscribe_thread_object.start()
+
     ################################################################################
     # Infinite Loop to send SNMP traps
     ################################################################################

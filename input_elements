@@ -6,35 +6,26 @@
     "targets": [
         {
             "nw-instance": "srbase-mgmt",
-            "address": "172.20.20.1"
+            "address": "172.20.20.1",
+            "community_string": "public"
+        },
+        {
+            "nw-instance": "srbase-mgmt",
+            "address": "172.20.20.1",
+            "community-string": "public"
         }
     ],
     "monitoring_elements": [
-        {
-            "resource": "interface[name=*]/",
-            "parameter": "oper-state",
-            "monitoring_condition": "admin-state=enable",
-            "resource_filter": [
-                "ethernet*",
-                "lag*",
-                "mgmt*"
-            ],
-            "trigger_condition": "up->down",
-            "trigger_message": "oper-down-reason",
-            "resolution_condition": "down->up",
-            "resolution_message": "operUP",
-            "trap_oid": ".1.3.6.1.4.1.94.2500.3001"
-        },
         {
             "resource": "/system/json-rpc-server/",
             "parameter": "admin-state",
             "monitoring_condition": "",
             "resource_filter": [],
             "trigger_condition": "enable->disable",
-            "trigger_message": "ADMIN STATE DISABLE",
+            "trigger_message": "AdminStateDisable",
             "resolution_condition": "disable->enable",
-            "resolution_message": "ADMIN STATE ENABLE",
-            "trap_oid": ".1.3.6.1.4.1.94.2500.3006"
+            "resolution_message": "AdminStateEnable",
+            "trap_oid": ".1.3.6.1.4.1.94.2500.3004"
         }
     ]
 }

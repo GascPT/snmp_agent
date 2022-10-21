@@ -69,7 +69,7 @@ global_paths = []
 targets = []
 elements = []
 
-subscribe_thread_object = ""
+
 
 #Credentials Class that willl save the gNMI Credentials in runtime
 class Credentials():
@@ -232,25 +232,18 @@ def addStatusToMemory(obj, filename = None):
                 # Add to the File
                 with open(FILENAME,"r+") as f:
                     file_data = json.load(f)
-                    aux_targets = []
                     targets_original = []
-
-                    for target in file_data['targets']:
-                        aux_targets.append(target)
-
-                    #Diff between global state targets and targets written on the file 
+                    
                     for t in targets:
                         targets_original.append(t.get_JSON())
 
-                    diff_targets = diffTwoJSONObjects(targets_original,aux_targets)
+                    file_data['targets'] = targets_original
+                   
+                    f.seek(0)
+                    f.write(json.dumps(file_data, indent=4))
+                    f.truncate()
 
-                    if not len(diff_targets) == 0:
-                        for t in diff_targets:
-                            file_data['targets'].append(t)
-                        
-                        f.seek(0)
-                        f.write(json.dumps(file_data, indent=4))
-                        f.truncate()
+                
 
         # Check if are configuration of a element
         elif obj.config.key.js_path == ".snmp_agent.monitoring_elements.element":
@@ -321,33 +314,25 @@ def addStatusToMemory(obj, filename = None):
                     file_data = json.load(f)
                     elements_original = []
 
+                    # FROM Memory
                     for e in elements:
                         elements_original.append(e.getJSON())
 
                     file_data['monitoring_elements'] = elements_original
-
-                    #file_data = json.load(f)
-                    #aux_elements = []
-                    #elements_original = []
-
-                    #for element in file_data['monitoring_elements']:
-                    #    aux_elements.append(element)
-
-                    #Diff between global state elements and elements written on the file 
-                    #for e in elements:
-                    #    elements_original.append(e.getJSON())
-
-                    #diff_elements = diffTwoJSONObjects(elements_original,aux_elements)
-            
-                    #if not len(diff_elements) == 0:
-                    #    for e in diff_elements:
-                    #        file_data['monitoring_elements'].append(e)
   
                     f.seek(0)
                     f.write(json.dumps(file_data, indent=4))
                     f.truncate()
 
-    
+                # Add to Subscribe
+                paths = getPathsToSubscribe(element)
+
+                if paths[1] == "":
+                    paths.pop()
+
+                th = threading.Thread(target=subscribe_thread, args=(paths,))
+                th.start()
+
     # From File
     else:
         try:    
@@ -422,7 +407,7 @@ def addStatusToMemory(obj, filename = None):
                     if not flag:
                         nw_instance = target['nw-instance']
                         address = target['address']
-                        community_string = target['community_string']
+                        community_string = target['community-string']
                         targets.append(Target(nw_instance,address,community_string))
                         
                 # Add Targets to State
@@ -705,12 +690,12 @@ def subscribe_thread(paths):
                 }
         )
     
-    global gnmi_credentials
+    global gnmi_credentials, queue
 
     with gNMIclient(target=host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
         telemetry_stream = gc.subscribe(subscribe=subscribe)
         #pygnmi implements this 'for' as infinite loop
-        for telemetry_entry in telemetry_stream:
+        for telemetry_entry in telemetry_stream: # Block Here
             telemetry_entry_str = telemetryParser(telemetry_entry) 
             if not "sync_response" in telemetry_entry_str :
                 queue.put(telemetry_entry_str)
@@ -734,6 +719,14 @@ def sendToAllTargets(msg_entry,t1,t2):
     for target in targets:
         sendSNMPTrap(msg_entry,target,t1,t2)
 
+def getPathsToSubscribe(element):
+    path = element.getPath()
+    monitoring_path = ""
+
+    if not element.getMonitoringCondition() == "":
+        monitoring_path = element.getMonitoringPath()
+    
+    return [path,monitoring_path]
 
 def addGlobalPaths():
     global global_paths,elements
@@ -827,7 +820,7 @@ def processEntry(entry):
 def Run():
     response = stub.AgentRegister(request=sdk_service_pb2.AgentRegistrationRequest(agent_liveliness=5), metadata=metadata)
     log.info(f"Registration response : {response.status}")
-    global subscribe_thread_object
+
 
     # Send Keep Alives
     th = threading.Thread(target=send_keep_alive)
@@ -859,8 +852,8 @@ def Run():
     ####################################################################################
     # START OF GNMI SUBSCRIBE THREAD
     ####################################################################################
-    subscribe_thread_object = threading.Thread(target=subscribe_thread, args=(global_paths,))
-    subscribe_thread_object.start()
+    th = threading.Thread(target=subscribe_thread, args=(global_paths,))
+    th.start()
 
     ################################################################################
     # Infinite Loop to send SNMP traps

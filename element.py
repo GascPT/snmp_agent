@@ -153,9 +153,9 @@ class Element:
  
         list_entry_path = self.cleanUpEntry(entry_path)
         list_element_path = self.cleanUpEntry(element_path)
-        #log.info(list_entry_path)
-        #log.info(list_element_path)
+
         i = 0
+
         for a in list_entry_path:
             #Verify existence of a key
             if i >= len(list_element_path):
@@ -173,14 +173,14 @@ class Element:
                 left_entry = a.split('[')[0]
                 left_elem = b.split('[')[0]
                 if not left_entry == left_elem:
-                    #log.info("Elements before keys dont match")
+                    #Elements before keys dont match
                     return False
 
                 entry_key = a.split('[')[1].lstrip().split(']')[0].split('=')[1]
                 
                 #Verify Existence of Key in Elem
                 if not '[' in b and not ']' in b:
-                    #log.info("Dont exist key in element path")
+                    #Dont exist key in element path
                     return False
 
                 elem_key = b.split('[')[1].lstrip().split(']')[0].split('=')[1]
@@ -190,7 +190,7 @@ class Element:
                 elif elem_key == '*':
                     continue
                 else:
-                    #log.info("Keys don't match")
+                    #Keys don't match
                     return False
 
             else:
@@ -199,10 +199,10 @@ class Element:
                     if a == self._parameter or a == self.getMonitoringParameter():
                         return True
                 if not a == b:
-                    #log.info("Elements not equal in the path")
+                    #Elements not equal in the path
                     return False
                        
-        log.info("Sommething bad happens")   
+        log.info("Something bad happens")   
         return False
     
 

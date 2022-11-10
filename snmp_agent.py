@@ -210,7 +210,6 @@ def addStatusToMemory(obj, filename = None):
             #Check if exits any config 
             if not obj.config.data.json == "{\n}\n":    
                 notification_targets = json.loads(obj.config.data.json) 
-                log.info(notification_targets)
                 # One notification for entry
                 address = obj.config.key.keys[0]
                 nw_instance = notification_targets['target']['network_instance']['value']
@@ -449,7 +448,6 @@ def gnmiSET(update_path) -> None:
     with gNMIclient(target= host, username=gnmi_credentials.getUser(), password=gnmi_credentials.getPassword(), insecure=True, debug = True) as gc:
         try:
             data = gc.set(update=update_path,encoding="json_ietf")
-            #log.info(f"gNMI SET Operation ::: {data}")
         except Exception as e:
             log.info(e)
 
@@ -473,7 +471,6 @@ def delStatusofMemory(obj):
         removeTargetsOfTelemetry(key)
         # Update Config
         addStatusToConfigDataStore()
-        log.info("ENTROU AQUI")
         #Remove From File
         with open(FILENAME,"r+") as f:
             file_data = json.load(f) 
@@ -518,7 +515,6 @@ def delStatusofMemory(obj):
 
 
 def changeStatusOfMemory(obj):
-    #log.info(obj)
     #Check if are target config
     if obj.config.key.js_path == ".snmp_agent.targets.target":
         #Check if exits any config 
@@ -630,15 +626,13 @@ def changeStatusOfMemory(obj):
 ##################################################################
 def Handle_Notification(obj) -> bool:
     if obj.HasField('config') and obj.config.key.js_path != ".commit.end":
-        log.info(f"OPeration:{obj.config.op}")
+        log.info(f"Handle_Notification: Operation:{obj.config.op}")
         if obj.config.op == 0: # Add Config Operation
             if "snmp_agent" in obj.config.key.js_path:
                 addStatusToMemory(obj)
         elif obj.config.op == 1: # Change Configuration 
-            
             changeStatusOfMemory(obj)
         elif obj.config.op == 2: # Delete Configuration 
-            log.info("Delete HANDLER")
             delStatusofMemory(obj)
         else:
             log.info("SOMETHING GONE WRONG")        
@@ -651,7 +645,6 @@ def NotificationStreamThread(stream_id):
     stream_response = sub_stub.NotificationStream(stream_request, metadata=metadata)
     time.sleep(2)
     for r in stream_response:
-        #log.info(r.notification)
         for obj in r.notification:
             Handle_Notification(obj)
 
@@ -748,10 +741,9 @@ def cleanUPPath(e):
         clean_path = re.sub(pattern,"/",clean_path)
 
     clean_path = clean_path.split(":")[1]# Clean the path model
-    #log.info(f"Path Clean: {clean_path}")
 
     if ":" in clean_path:
-        log.info("Error: Exitence of \":\" in path ")
+        log.info("Error: Existence of \":\" in path ")
 
     # ADD: PATH + PARAMETER
     if isinstance(e['val'],str): # Entry with parameter in the path
@@ -771,19 +763,15 @@ def processEntry(entry):
         log.info("Original Entry : " + str(e))
         # Clean up the path removing the model and adding the parameter
         entry_path, value = cleanUPPath(e)  
-        #log.info("Clean Stage: " + str(entry_path))
         for element in elements:
             path = element.getResource()
             # Verify if entry belongs to this element
             if element.verifyIfEntryBelongs(log,entry_path,value):
-                #log.info("Entry Belongs")
                 # Verify if entry exists in subpaths
                 if entry_path in element.getSubPathsKeys():
                     # Proceed to updates and checks triggers conditions
                     result, event, base_trap_oid, specified_trap_oid = element.updateStatus(log,entry_path,value)
-                    #log.info("Result: " + str(result))
                     if result:
-                        #log.info("Original Entry : " + str(e))
                         log.info(f"SEND SNMP TRAP with the Event: {event}")
                         sendToAllTargets(event + ": " + entry_path,base_trap_oid,specified_trap_oid)
                         element.set_traps_generated(element.get_traps_generated() + 1)
@@ -795,10 +783,8 @@ def processEntry(entry):
                     # Verify if is a monitoring path or normal path 
                     if element.verifyIfIsMonitoringPath(entry_path):
                         # ADD STATUS to subpath monitoring
-                        #log.info("Enter Monitoring Path")
                         resource = "/".join(entry_path.split("/")[:-1])
                         key_path = resource +"/"+ element.getParameter()
-                        #log.info(resource + "|" + key_path)
                         element.setSubPath(log,key_path,value)
                         break
 
@@ -807,7 +793,7 @@ def processEntry(entry):
                         # Check Resource Filter
                         #log.info("Add Entry for the First Time")
                         if element.checkFilter(log,entry_path):
-                            #log.info("Passed on Filter Condition")
+                            #Passed on Filter Condition
                             element.addPath(entry_path,value)
                         break
 

@@ -7,11 +7,6 @@
         {
             "nw-instance": "srbase-mgmt",
             "address": "172.20.20.1",
-            "community_string": "public"
-        },
-        {
-            "nw-instance": "srbase-mgmt",
-            "address": "172.20.20.1",
             "community-string": "public"
         }
     ],
